@@ -16,6 +16,8 @@ process.on('unhandledRejection', e => console.error('🛡️ REJECTION:', e));
 const games = new Map();
 const cooldowns = new Map();
 const GUILD_ID = process.env.GUILD_ID;
+const GAME_CHANNEL_ID = '1498406160204828742'; // Only allowed channel
+const BYPASS_ROLE_ID = '795466540140986368';   // Role that bypasses restriction
 
 const EMOJIS = {
     X:       process.env.EMOJI_X       || '❌',
@@ -55,6 +57,15 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     try {
         if (interaction.isChatInputCommand()) {
+            // ── CHANNEL LOCK ──────────────────────────────────────────────────
+            const hassBypass = interaction.member?.roles?.cache?.has(BYPASS_ROLE_ID);
+            if (!hassBypass && interaction.channelId !== GAME_CHANNEL_ID) {
+                return interaction.reply({
+                    content: `🚫 **Wrong Channel!** This bot only works in <#${GAME_CHANNEL_ID}>.`,
+                    ephemeral: true
+                }).catch(() => null);
+            }
+
             const { commandName } = interaction;
 
             // ── /tictactoe ───────────────────────────────────────────────────
