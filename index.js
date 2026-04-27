@@ -72,16 +72,13 @@ client.on('interactionCreate', async interaction => {
             if (commandName === 'leaderboard') {
                 await interaction.reply({ content: '🏆 Loading Hall of Legends...', ephemeral: false }).catch(() => null);
                 try {
-                    const [topPlayers, strongest, total, userRank] = await Promise.all([
-                        db.getLeaderboard(), db.getStrongestPlayer(),
-                        db.getTotalGames(), db.getUserRank(interaction.user.id)
+                    const [topPlayers, strongest] = await Promise.all([
+                        db.getLeaderboard(), db.getStrongestPlayer()
                     ]);
                     const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
                     const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id);
                     const attachment = new AttachmentBuilder(buffer, { name: 'leaderboard_v2.png' });
-                    const embed = UI.createLeaderboardEmbed(total, userRank);
-                    if (strongest) embed.addFields({ name: '👑 Strongest Warrior', value: `<@${strongest.user_id}> — Streak: **${strongest.highest_streak}**` });
-                    await interaction.editReply({ content: null, embeds: [embed], files: [attachment] });
+                    await interaction.editReply({ content: null, embeds: [], files: [attachment] });
                 } catch (err) {
                     console.error('LB Error:', err);
                     await interaction.editReply({ content: '❌ Could not load leaderboard.' });
