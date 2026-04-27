@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, AttachmentBuilder, EmbedBuilder } = require('discord.js');
 
 const GameEngine = require('./components/GameEngine');
 const UIBuilder = require('./components/UIBuilder');
@@ -10,14 +10,24 @@ const client = new Client({
     failIfNotExists: false
 });
 
-client.on('error', e => console.error('🛡️ SHIELD:', e));
-process.on('unhandledRejection', e => console.error('🛡️ REJECTION:', e));
+client.on('error', e => console.error('🛡️ CLIENT ERROR:', e));
+process.on('unhandledRejection', e => console.error('🛡️ UNHANDLED REJECTION:', e));
+process.on('uncaughtException', e => console.error('🛡️ UNCAUGHT EXCEPTION:', e));
 
-const games = new Map();
-const cooldowns = new Map();
-const GUILD_ID = process.env.GUILD_ID;
-const GAME_CHANNEL_ID = '1498406160204828742'; // Only allowed channel
-const BYPASS_ROLE_ID = '795466540140986368';   // Role that bypasses restriction
+// ─── CONCURRENCY STATE ───────────────────────────────────────────────────────
+const games       = new Map();   // gameId → gameState
+const cooldowns   = new Map();   // userId → expiresAt (ms)
+const activeUsers = new Set();   // userIds currently in a game (prevents multi-game exploit)
+const lockSet     = new Set();   // gameIds currently being processed (ATOMIC lock)
+
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const GUILD_ID       = process.env.GUILD_ID;
+const GAME_CHANNEL_ID = '1498406160204828742';
+const BYPASS_ROLE_ID  = '795466540140986368';
+const AFK_WARNING_MS  = 45_000;
+const AFK_FORFEIT_MS  = 60_000;
+const COOLDOWN_MS     = 5_000;
+const GAME_TTL_MS     = 300_000; // 5 min hard TTL
 
 const EMOJIS = {
     X:       process.env.EMOJI_X       || '❌',
@@ -36,12 +46,42 @@ const EMOJIS = {
 
 const UI = new UIBuilder(EMOJIS, client);
 
-// ─── AFK TIMEOUT CONSTANTS ──────────────────────────────────────────────────
-const AFK_WARNING_MS = 45_000;  // warn at 45s
-const AFK_FORFEIT_MS = 60_000;  // forfeit at 60s
+// ─── STRONGEST PLAYER CACHE (30s TTL) ───────────────────────────────────────
+let strongestCache = { data: null, fetchedAt: 0 };
+async function getStrongestCached() {
+    const now = Date.now();
+    if (now - strongestCache.fetchedAt < 30_000 && strongestCache.data !== undefined) {
+        return strongestCache.data;
+    }
+    const data = await db.getStrongestPlayer();
+    strongestCache = { data, fetchedAt: now };
+    return data;
+}
 
+// ─── COOLDOWN CLEANUP (every 60s, prevents memory leak at 3k users) ──────────
+setInterval(() => {
+    const now = Date.now();
+    for (const [userId, exp] of cooldowns) {
+        if (now >= exp) cooldowns.delete(userId);
+    }
+}, 60_000);
+
+// ─── GAME CLEANUP HELPER ──────────────────────────────────────────────────────
+function cleanupGame(gameId) {
+    const gs = games.get(gameId);
+    if (!gs) return;
+    clearTimeout(gs.afkWarningTimer);
+    clearTimeout(gs.afkForfeitTimer);
+    clearTimeout(gs.masterTimer);
+    activeUsers.delete(gs.players.X.id);
+    activeUsers.delete(gs.players.O.id);
+    lockSet.delete(gameId);
+    games.delete(gameId);
+}
+
+// ─── ON READY ────────────────────────────────────────────────────────────────
 client.once('ready', async () => {
-    console.log(`🚀 TIC TAC TEO V2.1 ACTIVE AS ${client.user.tag}!`);
+    console.log(`🚀 TIC TAC TEO V2.1 [NOKIA MODE] ACTIVE AS ${client.user.tag}!`);
     if (GUILD_ID) {
         try {
             const guild = await client.guilds.fetch(GUILD_ID);
@@ -50,186 +90,247 @@ client.once('ready', async () => {
         } catch (e) { console.error('❌ SYNC FAIL:', e.message); }
     }
     console.log('📦 PRE-CACHING...');
-    await Promise.all([EMOJIS.X, EMOJIS.O, EMOJIS.CROWN, EMOJIS.SUCCESS, EMOJIS.ERROR].map(e => GameEngine.getEmojiImage(e)));
+    await Promise.all([EMOJIS.X, EMOJIS.O, EMOJIS.CROWN, EMOJIS.SUCCESS, EMOJIS.ERROR]
+        .map(e => GameEngine.getEmojiImage(e)));
     console.log('💎 ASSETS READY!');
+    console.log(`📊 Games Map: ${games.size} | ActiveUsers: ${activeUsers.size}`);
 });
 
+// ─── INTERACTION HANDLER ─────────────────────────────────────────────────────
 client.on('interactionCreate', async interaction => {
     try {
+        // ── SLASH COMMANDS ────────────────────────────────────────────────────
         if (interaction.isChatInputCommand()) {
-            // ── CHANNEL LOCK ──────────────────────────────────────────────────
-            const hassBypass = interaction.member?.roles?.cache?.has(BYPASS_ROLE_ID);
-            if (!hassBypass && interaction.channelId !== GAME_CHANNEL_ID) {
+            const hasBypass = interaction.member?.roles?.cache?.has(BYPASS_ROLE_ID);
+            if (!hasBypass && interaction.channelId !== GAME_CHANNEL_ID) {
                 return interaction.reply({
-                    content: `🚫 **Wrong Channel!** This bot only works in <#${GAME_CHANNEL_ID}>.`,
+                    content: `🚫 **Wrong Channel!** Use <#${GAME_CHANNEL_ID}>.`,
                     ephemeral: true
                 }).catch(() => null);
             }
 
             const { commandName } = interaction;
 
-            // ── /tictactoe ───────────────────────────────────────────────────
+            // /tictactoe
             if (commandName === 'tictactoe') {
                 const now = Date.now();
                 const cd = cooldowns.get(interaction.user.id) || 0;
                 if (now < cd) {
-                    return interaction.reply({ content: `⏳ Cooldown! Wait ${Math.ceil((cd - now) / 1000)}s.`, ephemeral: true }).catch(() => null);
+                    return interaction.reply({
+                        content: `⏳ Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s**.`,
+                        ephemeral: true
+                    }).catch(() => null);
                 }
-                cooldowns.set(interaction.user.id, now + 5000);
-                await startNewGame(interaction, interaction.options.getUser('opponent'));
+
+                const opponent = interaction.options.getUser('opponent');
+                if (!opponent || opponent.bot || opponent.id === interaction.user.id) {
+                    return interaction.reply({ content: '❌ Invalid opponent.', ephemeral: true }).catch(() => null);
+                }
+
+                // Per-user active game guard
+                if (activeUsers.has(interaction.user.id)) {
+                    return interaction.reply({ content: '⚔️ You are already in a game! Finish it first.', ephemeral: true }).catch(() => null);
+                }
+                if (activeUsers.has(opponent.id)) {
+                    return interaction.reply({ content: `⚔️ <@${opponent.id}> is already in a game!`, ephemeral: true }).catch(() => null);
+                }
+
+                cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
+                await startNewGame(interaction, opponent);
             }
 
-            // ── /leaderboard ─────────────────────────────────────────────────
+            // /leaderboard
             if (commandName === 'leaderboard') {
                 await interaction.reply({ content: '🏆 Loading Hall of Legends...', ephemeral: false }).catch(() => null);
                 try {
                     const [topPlayers, strongest] = await Promise.all([
                         db.getLeaderboard(), db.getStrongestPlayer()
                     ]);
-                    const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
-                    const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id);
+                    const userData = await Promise.all(
+                        topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null))
+                    );
+                    const buffer = await GameEngine.renderLeaderboard(
+                        topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id
+                    );
                     const attachment = new AttachmentBuilder(buffer, { name: 'leaderboard_v2.png' });
                     await interaction.editReply({ content: null, embeds: [], files: [attachment] });
                 } catch (err) {
-                    console.error('LB Error:', err);
-                    await interaction.editReply({ content: '❌ Could not load leaderboard.' });
+                    console.error('[LB Error]', err.message);
+                    await interaction.editReply({ content: '❌ Could not load leaderboard.' }).catch(() => null);
                 }
             }
 
-            // ── /profile ─────────────────────────────────────────────────────
+            // /profile
             if (commandName === 'profile') {
-                await interaction.reply({ content: '📊 Loading your profile...', ephemeral: false }).catch(() => null);
+                await interaction.reply({ content: '📊 Loading profile...', ephemeral: false }).catch(() => null);
                 try {
                     const target = interaction.options.getUser('user') || interaction.user;
                     const [stats, globalRank] = await Promise.all([
                         db.getUserStats(target.id),
                         db.getUserRank(target.id)
                     ]);
-
                     if (!stats) {
-                        return interaction.editReply({ content: `<@${target.id}> hasn't played any games yet! Use \`/tictactoe\` to get started.` });
+                        return interaction.editReply({ content: `<@${target.id}> has no stats yet. Play a game first!` }).catch(() => null);
                     }
-
                     const rank = db.getRankTitle(stats.points);
                     const buffer = await GameEngine.renderProfileCard(target, stats, rank, globalRank);
                     const attachment = new AttachmentBuilder(buffer, { name: 'profile_v2.png' });
-
-                    const embed = new (require('discord.js').EmbedBuilder)()
+                    const embed = new EmbedBuilder()
                         .setColor(UI.getRank(stats.points).color)
                         .setTitle(`${target.username}'s Arena Profile`)
                         .setImage('attachment://profile_v2.png')
                         .setFooter({ text: 'Hyperions Arena • v2.1' });
-
                     await interaction.editReply({ content: null, embeds: [embed], files: [attachment] });
                 } catch (err) {
-                    console.error('Profile Error:', err);
-                    await interaction.editReply({ content: '❌ Could not load profile.' });
+                    console.error('[Profile Error]', err.message);
+                    await interaction.editReply({ content: '❌ Could not load profile.' }).catch(() => null);
                 }
             }
         }
 
+        // ── BUTTONS ───────────────────────────────────────────────────────────
         if (interaction.isButton()) {
-            // ── REPLAY ───────────────────────────────────────────────────────
+
+            // REMATCH button
             if (interaction.customId.startsWith('replay_')) {
-                const [_, p1Id, p2Id] = interaction.customId.split('_');
+                const parts = interaction.customId.split('_');
+                const p1Id = parts[1], p2Id = parts[2];
                 if (interaction.user.id !== p1Id && interaction.user.id !== p2Id) {
-                    return interaction.reply({ content: "Only original warriors can rematch!", ephemeral: true }).catch(() => null);
+                    return interaction.reply({ content: '❌ Only the original players can rematch!', ephemeral: true }).catch(() => null);
+                }
+                if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) {
+                    return interaction.reply({ content: '⚔️ A player is already in another game!', ephemeral: true }).catch(() => null);
                 }
                 await interaction.deferUpdate().catch(() => null);
-                const opponent = await client.users.fetch(interaction.user.id === p1Id ? p2Id : p1Id);
+                const opponentId = interaction.user.id === p1Id ? p2Id : p1Id;
+                const opponent = await client.users.fetch(opponentId).catch(() => null);
+                if (!opponent) return;
                 return startNewGame(interaction, opponent);
             }
 
-            // ── GAME MOVE ────────────────────────────────────────────────────
-            const [gameId, row, col] = interaction.customId.split('_');
+            // GAME MOVE button
+            const parts = interaction.customId.split('_');
+            if (parts.length !== 3) return; // Malformed — ignore silently
+
+            const [gameId, rawRow, rawCol] = parts;
+
+            // Validate row/col are legit grid positions (FIX #6 — NaN crash)
+            const r = parseInt(rawRow, 10);
+            const c = parseInt(rawCol, 10);
+            if (isNaN(r) || isNaN(c) || r < 0 || r > 2 || c < 0 || c > 2) return;
+
             const gameState = games.get(gameId);
-            if (!gameState) return interaction.reply({ content: "🏟️ Game expired.", ephemeral: true }).catch(() => null);
-
-            const currentPlayer = gameState.players[gameState.turn];
-            if (interaction.user.id !== currentPlayer.id) {
-                return interaction.reply({ content: `🚫 **Wait your turn!** <@${currentPlayer.id}> is thinking.`, ephemeral: true }).catch(() => null);
+            if (!gameState) {
+                return interaction.reply({ content: '🏟️ This game has expired.', ephemeral: true }).catch(() => null);
             }
-            if (gameState.processing) return interaction.deferUpdate().catch(() => null);
 
-            // Reset AFK timer on valid move
-            clearTimeout(gameState.afkWarningTimer);
-            clearTimeout(gameState.afkForfeitTimer);
+            // Turn check
+            const currentPlayer = gameState.players[gameState.turn];
+            if (!currentPlayer || interaction.user.id !== currentPlayer.id) {
+                return interaction.reply({
+                    content: `🚫 **Not your turn!** Waiting for <@${currentPlayer?.id}>.`,
+                    ephemeral: true
+                }).catch(() => null);
+            }
 
-            gameState.processing = true;
+            // ATOMIC LOCK (FIX #1 — race condition)
+            if (lockSet.has(gameId)) {
+                return interaction.deferUpdate().catch(() => null);
+            }
+            lockSet.add(gameId);
+
+            // Acknowledge immediately
             await interaction.deferUpdate().catch(() => null);
 
-            const r = parseInt(row), c = parseInt(col);
-            if (gameState.board[r][c]) { gameState.processing = false; return; }
-
-            gameState.board[r][c] = gameState.turn;
-            gameState.moveCount++;
-
-            const winnerKey = checkWinner(gameState.board);
-            let resX, resO;
-
-            if (winnerKey) {
-                gameState.winner = gameState.players[winnerKey];
-                const loserKey = winnerKey === 'X' ? 'O' : 'X';
-                [resX, resO] = await Promise.all([
-                    db.updateStats(gameState.players[winnerKey].id, 'win'),
-                    db.updateStats(gameState.players[loserKey].id, 'loss')
-                ]);
-            } else if (isBoardFull(gameState.board)) {
-                gameState.isDraw = true;
-                [resX, resO] = await Promise.all([
-                    db.updateStats(gameState.players.X.id, 'draw'),
-                    db.updateStats(gameState.players.O.id, 'draw')
-                ]);
-            } else {
-                gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
-            }
-
             try {
-                const strongest = await db.getStrongestPlayer();
+                // Double check cell not already filled
+                if (gameState.board[r][c]) return;
+
+                // Clear AFK timers
+                clearTimeout(gameState.afkWarningTimer);
+                clearTimeout(gameState.afkForfeitTimer);
+
+                // Make the move
+                gameState.board[r][c] = gameState.turn;
+                gameState.moveCount++;
+
+                const winnerKey = checkWinner(gameState.board);
+                let resX, resO;
+
+                if (winnerKey) {
+                    gameState.winner = gameState.players[winnerKey];
+                    const loserKey = winnerKey === 'X' ? 'O' : 'X';
+                    [resX, resO] = await Promise.all([
+                        db.updateStats(gameState.players[winnerKey].id, 'win'),
+                        db.updateStats(gameState.players[loserKey].id, 'loss')
+                    ]);
+                } else if (isBoardFull(gameState.board)) {
+                    gameState.isDraw = true;
+                    [resX, resO] = await Promise.all([
+                        db.updateStats(gameState.players.X.id, 'draw'),
+                        db.updateStats(gameState.players.O.id, 'draw')
+                    ]);
+                } else {
+                    gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
+                }
+
+                // Render the board
+                const strongest = await getStrongestCached(); // FIX #3 — cached!
                 const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
                 const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
-                const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw);
+                const embed = UI.createGameStatusEmbed(
+                    gameState.players.X, gameState.players.O,
+                    gameState.players[gameState.turn],
+                    gameState.winner, gameState.isDraw
+                );
 
                 await interaction.editReply({
                     content: null, embeds: [embed], files: [attachment],
                     components: UI.createGameButtons(gameState.board, !!(gameState.winner || gameState.isDraw), gameId)
                 });
 
-                const winnerResult = winnerKey ? (winnerKey === 'X' ? resX : resO) : null;
-
+                // ── GAME OVER ─────────────────────────────────────────────────
                 if (gameState.winner || gameState.isDraw) {
                     const duration = Math.round((Date.now() - gameState.startTime) / 1000);
-                    const stats = { moves: gameState.moveCount, duration };
+                    const matchStats = { moves: gameState.moveCount, duration };
                     const replayRow = UI.createReplayButton(gameState.players.X.id, gameState.players.O.id);
 
                     if (gameState.winner) {
-                        const wr = winnerResult;
-                        const winEmbed = UI.createVictoryAnnouncement(gameState.winner, wr?.data?.current_streak || 1, wr?.data?.points || 0, stats);
+                        const winnerRes = winnerKey === 'X' ? resX : resO;
+                        const winEmbed = UI.createVictoryAnnouncement(
+                            gameState.winner,
+                            winnerRes?.data?.current_streak || 1,
+                            winnerRes?.data?.points || 0,
+                            matchStats
+                        );
                         await interaction.followUp({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
 
-                        // RANK UP announcement
-                        if (wr?.rankUp) {
-                            const rankEmbed = UI.createRankUpAnnouncement(gameState.winner, wr.oldRank, wr.newRank);
-                            await interaction.followUp({ embeds: [rankEmbed] }).catch(() => null);
+                        if (winnerRes?.rankUp) {
+                            await interaction.followUp({
+                                embeds: [UI.createRankUpAnnouncement(gameState.winner, winnerRes.oldRank, winnerRes.newRank)]
+                            }).catch(() => null);
                         }
-
-                        // STREAK MILESTONE announcement
-                        if (wr?.milestoneStreak) {
-                            const streakEmbed = UI.createStreakMilestoneAnnouncement(gameState.winner, wr.milestoneStreak);
-                            await interaction.followUp({ embeds: [streakEmbed] }).catch(() => null);
+                        if (winnerRes?.milestoneStreak) {
+                            await interaction.followUp({
+                                embeds: [UI.createStreakMilestoneAnnouncement(gameState.winner, winnerRes.milestoneStreak)]
+                            }).catch(() => null);
                         }
                     } else {
                         const drawEmbed = UI.createDrawAnnouncement(gameState.players.X, gameState.players.O);
                         await interaction.followUp({ embeds: [drawEmbed], components: [replayRow] }).catch(() => null);
                     }
+
+                    cleanupGame(gameId); // FIX #7 — proper full cleanup
+
                 } else {
-                    // AFK Timers for the next player
+                    // ── SET AFK TIMERS FOR NEXT PLAYER ────────────────────────
                     const nextPlayer = gameState.players[gameState.turn];
+
                     gameState.afkWarningTimer = setTimeout(async () => {
-                        try {
-                            const warnEmbed = UI.createAfkWarning(nextPlayer, 15);
-                            await interaction.followUp({ embeds: [warnEmbed] }).catch(() => null);
-                        } catch { /* ignore */ }
+                        if (!games.has(gameId)) return;
+                        await interaction.followUp({
+                            embeds: [UI.createAfkWarning(nextPlayer, 15)]
+                        }).catch(() => null);
                     }, AFK_WARNING_MS);
 
                     gameState.afkForfeitTimer = setTimeout(async () => {
@@ -239,80 +340,93 @@ client.on('interactionCreate', async interaction => {
                         await Promise.all([
                             db.updateStats(forfeitWinner.id, 'win'),
                             db.updateStats(nextPlayer.id, 'loss')
-                        ]);
-                        const forfeitEmbed = UI.createAfkForfeit(nextPlayer, forfeitWinner);
+                        ]).catch(() => null);
                         const replayRow = UI.createReplayButton(gs.players.X.id, gs.players.O.id);
-                        await interaction.followUp({ embeds: [forfeitEmbed], components: [replayRow] }).catch(() => null);
-                        games.delete(gameId);
+                        await interaction.followUp({
+                            embeds: [UI.createAfkForfeit(nextPlayer, forfeitWinner)],
+                            components: [replayRow]
+                        }).catch(() => null);
+                        cleanupGame(gameId);
                     }, AFK_FORFEIT_MS);
                 }
-            } catch (err) {
-                console.error('Move Render Error:', err);
-            }
 
-            gameState.processing = false;
-            if (gameState.winner || gameState.isDraw) games.delete(gameId);
+            } catch (err) {
+                console.error('[Move Error]', err.message);
+            } finally {
+                // FIX #4 — ALWAYS release the lock, even if something threw
+                lockSet.delete(gameId);
+            }
         }
+
     } catch (err) {
-        console.error('🛑 CRITICAL:', err);
+        console.error('🛑 GLOBAL SHIELD:', err.message);
     }
 });
 
+// ─── START NEW GAME ───────────────────────────────────────────────────────────
 async function startNewGame(interaction, opponent) {
     try {
-        if (!opponent || opponent.bot || opponent.id === (interaction.user?.id || interaction.member?.id)) {
-            return interaction.reply({ content: "Invalid challenge!", ephemeral: true }).catch(() => null);
-        }
         const method = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-        await interaction[method]({ content: '🛡️ **Battle Loading...**', embeds: [], components: [], files: [] }).catch(() => null);
+        await interaction[method]({
+            content: '🛡️ **Battle Loading...**', embeds: [], components: [], files: []
+        }).catch(() => null);
 
         const gameId = interaction.id;
+        const playerX = interaction.user || interaction.member?.user;
+        const playerO = opponent;
+
         const gameState = {
             id: gameId,
-            players: { X: interaction.user || interaction.member.user, O: opponent },
+            players: { X: playerX, O: playerO },
             board: Array(3).fill(null).map(() => Array(3).fill(null)),
-            turn: 'X', winner: null, isDraw: false, processing: false,
+            turn: 'X', winner: null, isDraw: false,
             startTime: Date.now(), moveCount: 0,
-            afkWarningTimer: null, afkForfeitTimer: null
+            afkWarningTimer: null, afkForfeitTimer: null, masterTimer: null
         };
-        games.set(gameId, gameState);
 
-        const strongest = await db.getStrongestPlayer();
+        games.set(gameId, gameState);
+        activeUsers.add(playerX.id); // FIX #5 — track active users
+        activeUsers.add(playerO.id);
+
+        const strongest = await getStrongestCached();
         const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
         const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
-        const embed = UI.createGameStatusEmbed(gameState.players.X, opponent, gameState.players.X);
+        const embed = UI.createGameStatusEmbed(playerX, playerO, playerX);
 
         await interaction.editReply({
             content: null, embeds: [embed], files: [attachment],
             components: UI.createGameButtons(gameState.board, false, gameId)
         });
 
-        // Set initial AFK timer for X
+        // Initial AFK timers (for player X who goes first)
         gameState.afkWarningTimer = setTimeout(async () => {
             if (!games.has(gameId)) return;
-            const warnEmbed = UI.createAfkWarning(gameState.players.X, 15);
-            await interaction.followUp({ embeds: [warnEmbed] }).catch(() => null);
+            await interaction.followUp({ embeds: [UI.createAfkWarning(playerX, 15)] }).catch(() => null);
         }, AFK_WARNING_MS);
 
         gameState.afkForfeitTimer = setTimeout(async () => {
             if (!games.has(gameId)) return;
-            const gs = games.get(gameId);
             await Promise.all([
-                db.updateStats(gs.players.O.id, 'win'),
-                db.updateStats(gs.players.X.id, 'loss')
-            ]);
-            const forfeitEmbed = UI.createAfkForfeit(gs.players.X, gs.players.O);
-            const replayRow = UI.createReplayButton(gs.players.X.id, gs.players.O.id);
-            await interaction.followUp({ embeds: [forfeitEmbed], components: [replayRow] }).catch(() => null);
-            games.delete(gameId);
+                db.updateStats(playerO.id, 'win'),
+                db.updateStats(playerX.id, 'loss')
+            ]).catch(() => null);
+            const replayRow = UI.createReplayButton(playerX.id, playerO.id);
+            await interaction.followUp({
+                embeds: [UI.createAfkForfeit(playerX, playerO)],
+                components: [replayRow]
+            }).catch(() => null);
+            cleanupGame(gameId);
         }, AFK_FORFEIT_MS);
 
-        setTimeout(() => { clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer); games.delete(gameId); }, 300_000);
+        // FIX #7 — Master TTL clears AFK timers too before deleting
+        gameState.masterTimer = setTimeout(() => cleanupGame(gameId), GAME_TTL_MS);
+
     } catch (e) {
-        console.error('Start Error:', e);
+        console.error('[Start Error]', e.message);
     }
 }
 
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function checkWinner(board) {
     for (let i = 0; i < 3; i++) {
         if (board[i][0] && board[i][0] === board[i][1] && board[i][0] === board[i][2]) return board[i][0];
