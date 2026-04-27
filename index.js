@@ -15,10 +15,11 @@ process.on('unhandledRejection', e => console.error('🛡️ UNHANDLED REJECTION
 process.on('uncaughtException', e => console.error('🛡️ UNCAUGHT EXCEPTION:', e));
 
 // ─── CONCURRENCY STATE ───────────────────────────────────────────────────────
-const games       = new Map();   // gameId → gameState
-const cooldowns   = new Map();   // userId → expiresAt (ms)
-const activeUsers = new Set();   // userIds currently in a game (prevents multi-game exploit)
-const lockSet     = new Set();   // gameIds currently being processed (ATOMIC lock)
+const games        = new Map();   // gameId → gameState
+const cooldowns    = new Map();   // userId → expiresAt (ms)
+const activeUsers  = new Set();   // userIds in a game
+const lockSet      = new Set();   // atomic move locks
+const rematchPending = new Map(); // pairKey → { initiatorId, timer }
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const GUILD_ID       = process.env.GUILD_ID;
@@ -26,7 +27,7 @@ const GAME_CHANNEL_ID = '1498406160204828742';
 const BYPASS_ROLE_ID  = '795466540140986368';
 const AFK_WARNING_MS  = 45_000;
 const AFK_FORFEIT_MS  = 60_000;
-const COOLDOWN_MS     = 5_000;
+const COOLDOWN_MS     = 120_000; // 2 minutes — anti-spam
 const GAME_TTL_MS     = 300_000; // 5 min hard TTL
 
 const EMOJIS = {
@@ -191,21 +192,57 @@ client.on('interactionCreate', async interaction => {
         // ── BUTTONS ───────────────────────────────────────────────────────────
         if (interaction.isButton()) {
 
-            // REMATCH button
+            // REMATCH button — mutual confirmation required
             if (interaction.customId.startsWith('replay_')) {
-                const parts = interaction.customId.split('_');
-                const p1Id = parts[1], p2Id = parts[2];
-                if (interaction.user.id !== p1Id && interaction.user.id !== p2Id) {
-                    return interaction.reply({ content: '❌ Only the original players can rematch!', ephemeral: true }).catch(() => null);
+                const parts  = interaction.customId.split('_');
+                const p1Id   = parts[1], p2Id = parts[2];
+                const clickerId = interaction.user.id;
+
+                if (clickerId !== p1Id && clickerId !== p2Id) {
+                    return interaction.reply({ content: '❌ Only the original players can request a rematch!', ephemeral: true }).catch(() => null);
                 }
-                if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) {
-                    return interaction.reply({ content: '⚔️ A player is already in another game!', ephemeral: true }).catch(() => null);
+
+                // Canonical key so order doesn't matter
+                const pairKey = [p1Id, p2Id].sort().join('_');
+                const opponentId = clickerId === p1Id ? p2Id : p1Id;
+
+                if (rematchPending.has(pairKey)) {
+                    const pending = rematchPending.get(pairKey);
+
+                    if (pending.initiatorId === clickerId) {
+                        // Same person clicking again
+                        return interaction.reply({
+                            content: `⏳ Already waiting for <@${opponentId}> to confirm the rematch!`,
+                            ephemeral: true
+                        }).catch(() => null);
+                    }
+
+                    // OTHER player confirmed → start game!
+                    clearTimeout(pending.timer);
+                    rematchPending.delete(pairKey);
+
+                    if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) {
+                        return interaction.reply({ content: '⚔️ A player is already in another game!', ephemeral: true }).catch(() => null);
+                    }
+
+                    await interaction.deferUpdate().catch(() => null);
+                    const opponent = await client.users.fetch(opponentId).catch(() => null);
+                    if (!opponent) return;
+                    return startNewGame(interaction, opponent);
+
+                } else {
+                    // First player requesting rematch
+                    const timer = setTimeout(() => {
+                        rematchPending.delete(pairKey);
+                    }, 60_000);
+
+                    rematchPending.set(pairKey, { initiatorId: clickerId, timer });
+
+                    return interaction.reply({
+                        content: `🎮 <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch** to confirm! *(expires in 60s)*`,
+                        ephemeral: false
+                    }).catch(() => null);
                 }
-                await interaction.deferUpdate().catch(() => null);
-                const opponentId = interaction.user.id === p1Id ? p2Id : p1Id;
-                const opponent = await client.users.fetch(opponentId).catch(() => null);
-                if (!opponent) return;
-                return startNewGame(interaction, opponent);
             }
 
             // GAME MOVE button
