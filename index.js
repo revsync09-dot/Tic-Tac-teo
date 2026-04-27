@@ -39,11 +39,11 @@ const EMOJIS = {
     STREAK:  process.env.EMOJI_STREAK  || '🔥',
     REMATCH: process.env.EMOJI_REMATCH || '🎮',
     DRAW:    process.env.EMOJI_DRAW    || '🤝',
-    CROWN:   process.env.EMOJI_CROWN   || '👑',
-    SUCCESS: process.env.EMOJI_SUCCESS || '✅',
+    CROWN:   process.env.EMOJI_CROWN   || process.env.EMOJI_WIN || '1482120473251807302',
+    SUCCESS: process.env.EMOJI_SUCCESS || '1480578220003819726', 
     ERROR:   process.env.EMOJI_ERROR   || '❌',
     EMPTY:   process.env.EMOJI_EMPTY   || '➖',
-    STATS:   process.env.EMOJI_STATS   || '📊'
+    STATS:   process.env.EMOJI_STATS   || '1480578098952142999'
 };
 
 const UI = new UIBuilder(EMOJIS, client);
