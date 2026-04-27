@@ -101,7 +101,7 @@ class UIBuilder {
                 `${emojiRank} **Rank:** \`${rank.title}\`\n` +
                 `${emojiStreak} **Current Streak:** ${streak}\n` +
                 `${emojiPoints} **Points Earned:** +3\n\n` +
-                `📊 **Match:** ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n\n` +
+                `${this.formatEmoji(this.emojis.STATS, '📊')} **Match:** ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n\n` +
                 `Use \`/profile\` to see your full stats!`
             )
             .setFooter({ text: 'Tournament Level Match' })
@@ -190,7 +190,7 @@ class UIBuilder {
             .setDescription(
                 `🤝 **Warriors:** <@${player1.id}> & <@${player2.id}>\n` +
                 `${emojiPoints} **+1 Point** for both players\n\n` +
-                `Use \`/profile\` to see your stats!`
+                `${this.formatEmoji(this.emojis.STATS, '📊')} Use \`/profile\` to see your stats!`
             )
             .setTimestamp();
     }

@@ -42,7 +42,8 @@ const EMOJIS = {
     CROWN:   process.env.EMOJI_CROWN   || '👑',
     SUCCESS: process.env.EMOJI_SUCCESS || '✅',
     ERROR:   process.env.EMOJI_ERROR   || '❌',
-    EMPTY:   process.env.EMOJI_EMPTY   || '➖'
+    EMPTY:   process.env.EMOJI_EMPTY   || '➖',
+    STATS:   process.env.EMOJI_STATS   || '📊'
 };
 
 const UI = new UIBuilder(EMOJIS, client);
@@ -163,7 +164,8 @@ client.on('interactionCreate', async interaction => {
 
             // /profile
             if (commandName === 'profile') {
-                await interaction.reply({ content: '📊 Loading profile...', ephemeral: false }).catch(() => null);
+                const emojiStats = UI.formatEmoji(EMOJIS.STATS, '📊');
+                await interaction.reply({ content: `${emojiStats} Loading profile...`, ephemeral: false }).catch(() => null);
                 try {
                     const target = interaction.options.getUser('user') || interaction.user;
                     const [stats, globalRank] = await Promise.all([
