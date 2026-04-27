@@ -6,28 +6,25 @@ const UIBuilder = require('./components/UIBuilder');
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const games        = new Map();   // gameId → gameState
-const cooldowns    = new Map();   // userId → expirationTimestamp
-const activeUsers  = new Set();   // userIds in a game
-const lockSet      = new Set();   // atomic move locks
-const rematchPending = new Map(); // pairKey → { initiatorId, timer }
+const games           = new Map();   // gameId → gameState
+const cooldowns       = new Map();   // userId → expirationTimestamp
+const activeUsers     = new Set();   // userIds in a game
+const lockSet         = new Set();   // atomic move locks
+const challengeLocks  = new Set();   // prevents double-acceptance
+const rematchPending  = new Map(); // pairKey → { initiatorId, timer }
 const challengesPending = new Map(); // targetId → { challengerId, timer }
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
-const GUILD_ID       = process.env.GUILD_ID;
+const GUILD_ID        = process.env.GUILD_ID;
 const GAME_CHANNEL_ID = '1498406160204828742'; 
-const BYPASS_ROLE_ID  = '795466540140986368';
-const AFK_WARNING_MS  = 45_000;
-const AFK_FORFEIT_MS  = 60_000;
-const COOLDOWN_MS     = 20_000; // 20 seconds
-const GAME_TTL_MS     = 300_000; // 5 min hard TTL
+const BYPASS_ROLE_ID   = '795466540140986368';
+const AFK_WARNING_MS   = 45_000;
+const AFK_FORFEIT_MS   = 60_000;
+const COOLDOWN_MS      = 20_000; 
+const GAME_TTL_MS      = 300_000;
 
 const EMOJIS = {
     X:       process.env.EMOJI_X       || '❌',
@@ -48,12 +45,18 @@ const EMOJIS = {
 const UI = new UIBuilder(EMOJIS, client);
 
 // ─── EVENTS ──────────────────────────────────────────────────────────────────
-client.once('ready', async () => {
-    console.log(`🚀 TIC TAC TEO V2.1 ACTIVE AS ${client.user.tag}!`);
+client.once('ready', () => {
+    console.log(`🚀 TIC TAC TEO V2.1 [NOKIA-STONE HARDENED] ACTIVE!`);
+    // Cleanup stale cooldowns every minute
+    setInterval(() => {
+        const now = Date.now();
+        for (const [id, exp] of cooldowns) if (now >= exp) cooldowns.delete(id);
+    }, 60_000);
 });
 
 client.on('interactionCreate', async interaction => {
     try {
+        // ── SLASH COMMANDS ───────────────────────────────────────────────────
         if (interaction.isChatInputCommand()) {
             if (interaction.channelId !== GAME_CHANNEL_ID && !interaction.member.roles.cache.has(BYPASS_ROLE_ID)) {
                 return interaction.reply({ content: `🚫 **Wrong Channel!** Use <#${GAME_CHANNEL_ID}>.`, ephemeral: true }).catch(() => null);
@@ -68,12 +71,14 @@ client.on('interactionCreate', async interaction => {
 
                 const opponent = interaction.options.getUser('opponent');
                 if (!opponent || opponent.bot || opponent.id === interaction.user.id) return interaction.reply({ content: '❌ Invalid opponent.', ephemeral: true }).catch(() => null);
-                if (activeUsers.has(interaction.user.id) || activeUsers.has(opponent.id)) return interaction.reply({ content: '⚔️ Someone is already in a game!', ephemeral: true }).catch(() => null);
+                if (activeUsers.has(interaction.user.id)) return interaction.reply({ content: '⚔️ You are already in a game!', ephemeral: true }).catch(() => null);
+                if (activeUsers.has(opponent.id)) return interaction.reply({ content: '⚔️ Opponent is already in a game!', ephemeral: true }).catch(() => null);
 
                 cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
+                
                 const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent);
                 const row = UI.createChallengeButtons(interaction.user.id, opponent.id);
-                await interaction.reply({ content: `⚔️ <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] });
+                await interaction.reply({ content: `⚔️ <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
 
                 const timer = setTimeout(() => {
                     if (challengesPending.has(opponent.id)) {
@@ -85,41 +90,33 @@ client.on('interactionCreate', async interaction => {
             }
 
             if (commandName === 'leaderboard') {
-                await interaction.reply({ content: '🏆 Loading Hall of Legends...', ephemeral: false }).catch(() => null);
-                try {
-                    const [topPlayers, strongest] = await Promise.all([db.getLeaderboard(), db.getStrongestPlayer()]);
-                    const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
-                    const buffer = await GameEngine.renderBoard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id);
-                    // Re-render because GameEngine.renderBoard argument order was wrong in my snippet
-                    const bufferCorrect = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id);
-                    const attachment = new AttachmentBuilder(bufferCorrect, { name: 'leaderboard_v2.png' });
-                    await interaction.editReply({ content: null, embeds: [], files: [attachment] });
-                } catch (err) { await interaction.editReply({ content: '❌ Could not load leaderboard.' }).catch(() => null); }
+                await interaction.deferReply().catch(() => null);
+                const [topPlayers, strongest] = await Promise.all([db.getLeaderboard(), db.getStrongestPlayer()]);
+                const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
+                const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id);
+                const attachment = new AttachmentBuilder(buffer, { name: 'leaderboard_v2.png' });
+                await interaction.editReply({ content: null, files: [attachment] }).catch(() => null);
             }
 
             if (commandName === 'weekly') {
-                await interaction.reply({ content: '🔥 Loading Weekly Top Warriors...', ephemeral: false }).catch(() => null);
-                try {
-                    const [topPlayers, strongest] = await Promise.all([db.getWeeklyLeaderboard(), db.getStrongestPlayer()]);
-                    const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
-                    const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id, 'WEEKLY RANKINGS');
-                    const attachment = new AttachmentBuilder(buffer, { name: 'weekly_v2.png' });
-                    await interaction.editReply({ content: null, embeds: [], files: [attachment] });
-                } catch (err) { await interaction.editReply({ content: '❌ Could not load weekly leaderboard.' }).catch(() => null); }
+                await interaction.deferReply().catch(() => null);
+                const [topPlayers, strongest] = await Promise.all([db.getWeeklyLeaderboard(), db.getStrongestPlayer()]);
+                const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
+                const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id, 'WEEKLY RANKINGS');
+                const attachment = new AttachmentBuilder(buffer, { name: 'weekly_v2.png' });
+                await interaction.editReply({ content: null, files: [attachment] }).catch(() => null);
             }
 
             if (commandName === 'profile') {
                 const target = interaction.options.getUser('user') || interaction.user;
-                await interaction.reply({ content: `📊 Loading profile...`, ephemeral: false }).catch(() => null);
-                try {
-                    const [stats, globalRank] = await Promise.all([db.getUserStats(target.id), db.getUserRank(target.id)]);
-                    if (!stats) return interaction.editReply({ content: 'No stats yet!' });
-                    const rank = db.getRankTitle(stats.points);
-                    const buffer = await GameEngine.renderProfileCard(target, stats, rank, globalRank);
-                    const attachment = new AttachmentBuilder(buffer, { name: 'profile_v2.png' });
-                    const embed = new EmbedBuilder().setColor(UI.getRank(stats.points).color).setTitle(`${target.username}'s Arena Profile`).setImage('attachment://profile_v2.png');
-                    await interaction.editReply({ content: null, embeds: [embed], files: [attachment] });
-                } catch (err) { await interaction.editReply({ content: '❌ Could not load profile.' }).catch(() => null); }
+                await interaction.deferReply().catch(() => null);
+                const [stats, globalRank] = await Promise.all([db.getUserStats(target.id), db.getUserRank(target.id)]);
+                if (!stats) return interaction.editReply({ content: 'No stats yet!' }).catch(() => null);
+                const rank = db.getRankTitle(stats.points);
+                const buffer = await GameEngine.renderProfileCard(target, stats, rank, globalRank);
+                const attachment = new AttachmentBuilder(buffer, { name: 'profile_v2.png' });
+                const embed = new EmbedBuilder().setColor(UI.getRank(stats.points).color).setTitle(`${target.username}'s Arena Profile`).setImage('attachment://profile_v2.png');
+                await interaction.editReply({ content: null, embeds: [embed], files: [attachment] }).catch(() => null);
             }
 
             if (commandName === 'rewards') {
@@ -128,35 +125,68 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
+        // ── BUTTONS ───────────────────────────────────────────────────────────
         if (interaction.isButton()) {
+            
+            // ACCEPT BATTLE button
             if (interaction.customId.startsWith('accept_battle_')) {
                 const parts = interaction.customId.split('_');
                 const challengerId = parts[2], targetId = parts[3];
-                if (interaction.user.id !== targetId) return;
+                if (interaction.user.id !== targetId) return interaction.reply({ content: '❌ This is not your challenge!', ephemeral: true }).catch(() => null);
+                
+                // Prevent spam clicks
+                if (challengeLocks.has(targetId)) return;
+                challengeLocks.add(targetId);
+
                 const pending = challengesPending.get(targetId);
-                if (!pending) return interaction.reply({ content: '⏳ Challenge expired.', ephemeral: true }).catch(() => null);
-                clearTimeout(pending.timer); challengesPending.delete(targetId);
+                if (!pending || pending.challengerId !== challengerId) {
+                    challengeLocks.delete(targetId);
+                    return interaction.reply({ content: '⏳ Challenge expired or invalid.', ephemeral: true }).catch(() => null);
+                }
+
+                if (activeUsers.has(challengerId) || activeUsers.has(targetId)) {
+                    challengeLocks.delete(targetId);
+                    return interaction.reply({ content: '⚔️ One of you is already in a game!', ephemeral: true }).catch(() => null);
+                }
+
+                clearTimeout(pending.timer);
+                challengesPending.delete(targetId);
+                
                 await interaction.deferUpdate().catch(() => null);
                 const challenger = await client.users.fetch(challengerId).catch(() => null);
-                if (!challenger) return;
+                
+                // Set cooldown for BOTH
                 const newCd = Date.now() + COOLDOWN_MS;
                 cooldowns.set(challengerId, newCd); cooldowns.set(targetId, newCd);
-                return startNewGame(interaction, challenger);
+                
+                try {
+                    await startNewGame(interaction, challenger);
+                } finally {
+                    challengeLocks.delete(targetId);
+                }
+                return;
             }
 
+            // REMATCH button
             if (interaction.customId.startsWith('replay_')) {
                 const parts = interaction.customId.split('_');
                 const p1Id = parts[1], p2Id = parts[2];
                 const clickerId = interaction.user.id;
-                if (clickerId !== p1Id && clickerId !== p2Id) return;
+                if (clickerId !== p1Id && clickerId !== p2Id) return interaction.reply({ content: '❌ Not your game!', ephemeral: true }).catch(() => null);
+
                 const pairKey = [p1Id, p2Id].sort().join('_');
                 const opponentId = clickerId === p1Id ? p2Id : p1Id;
                 const cd = cooldowns.get(clickerId) || 0;
                 if (Date.now() < cd) return interaction.reply({ content: `⏳ Cooldown! Wait **${Math.ceil((cd - Date.now()) / 1000)}s**.`, ephemeral: true }).catch(() => null);
+
                 if (rematchPending.has(pairKey)) {
                     const pending = rematchPending.get(pairKey);
-                    if (pending.initiatorId === clickerId) return;
+                    if (pending.initiatorId === clickerId) return interaction.reply({ content: '⏳ Waiting for opponent...', ephemeral: true }).catch(() => null);
+                    
                     clearTimeout(pending.timer); rematchPending.delete(pairKey);
+                    if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) return interaction.reply({ content: '⚔️ Someone is in another game!', ephemeral: true }).catch(() => null);
+                    
+                    await interaction.deferUpdate().catch(() => null);
                     const opponent = await client.users.fetch(opponentId).catch(() => null);
                     return startNewGame(interaction, opponent);
                 } else {
@@ -166,23 +196,26 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
+            // GAME MOVE button
             const parts = interaction.customId.split('_');
             if (parts.length !== 3) return;
             const [gameId, row, col] = parts;
             const gameState = games.get(gameId);
-            if (!gameState) return;
+            if (!gameState) return interaction.reply({ content: '🏟️ Game expired.', ephemeral: true }).catch(() => null);
 
             const currentPlayer = gameState.players[gameState.turn];
             if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
-            if (lockSet.has(gameId)) return interaction.deferUpdate().catch(() => null);
-
-            const r = parseInt(row), c = parseInt(col);
-            if (gameState.board[r][c]) return;
-
+            
+            // Atomic Lock
+            if (lockSet.has(gameId)) return;
             lockSet.add(gameId);
+
             await interaction.deferUpdate().catch(() => null);
 
             try {
+                const r = parseInt(row), c = parseInt(col);
+                if (gameState.board[r][c]) return;
+
                 clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
                 gameState.board[r][c] = gameState.turn;
                 gameState.moveCount++;
@@ -193,15 +226,15 @@ client.on('interactionCreate', async interaction => {
                 if (winnerKey) {
                     gameState.winner = gameState.players[winnerKey];
                     const loserKey = winnerKey === 'X' ? 'O' : 'X';
-                    [resX, resO] = await Promise.all([db.updateStats(gameState.players[winnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]);
+                    [resX, resO] = await Promise.all([db.updateStats(gameState.players[winnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]).catch(() => [null, null]);
                 } else if (isBoardFull(gameState.board)) {
                     gameState.isDraw = true;
-                    [resX, resO] = await Promise.all([db.updateStats(gameState.players.X.id, 'draw'), db.updateStats(gameState.players.O.id, 'draw')]);
+                    [resX, resO] = await Promise.all([db.updateStats(gameState.players.X.id, 'draw'), db.updateStats(gameState.players.O.id, 'draw')]).catch(() => [null, null]);
                 } else {
                     gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
                 }
 
-                const strongest = await db.getStrongestPlayer();
+                const strongest = await db.getStrongestPlayer().catch(() => null);
                 const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
                 const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
                 const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw);
@@ -209,7 +242,7 @@ client.on('interactionCreate', async interaction => {
                 await interaction.editReply({
                     content: null, embeds: [embed], files: [attachment],
                     components: UI.createGameComponents(gameState.board, !!(gameState.winner || gameState.isDraw), gameId)
-                });
+                }).catch(() => null);
 
                 if (gameState.winner || gameState.isDraw) {
                     const duration = Math.round((Date.now() - gameState.startTime) / 1000);
@@ -228,28 +261,30 @@ client.on('interactionCreate', async interaction => {
                 }
             } finally { lockSet.delete(gameId); }
         }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error('[Fatal Interaction Error]', e); }
 });
 
 async function startNewGame(interaction, opponent) {
+    const gameId = interaction.id;
+    const playerX = interaction.user;
+    const gameState = {
+        id: gameId, players: { X: playerX, O: opponent },
+        board: Array(3).fill(null).map(() => Array(3).fill(null)),
+        turn: 'X', winner: null, isDraw: false, startTime: Date.now(), moveCount: 0
+    };
+    games.set(gameId, gameState); activeUsers.add(playerX.id); activeUsers.add(opponent.id);
+    
     try {
-        const method = interaction.replied || interaction.deferred ? 'editReply' : 'reply';
-        await interaction[method]({ content: '🛡️ **Battle Loading...**', embeds: [], components: [], files: [] }).catch(() => null);
-        const gameId = interaction.id;
-        const playerX = interaction.user;
-        const gameState = {
-            id: gameId, players: { X: playerX, O: opponent },
-            board: Array(3).fill(null).map(() => Array(3).fill(null)),
-            turn: 'X', winner: null, isDraw: false, startTime: Date.now(), moveCount: 0
-        };
-        games.set(gameId, gameState); activeUsers.add(playerX.id); activeUsers.add(opponent.id);
-        const strongest = await db.getStrongestPlayer();
+        const strongest = await db.getStrongestPlayer().catch(() => null);
         const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
         const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
         const embed = UI.createGameStatusEmbed(playerX, opponent, playerX);
-        await interaction.editReply({ content: null, embeds: [embed], files: [attachment], components: UI.createGameComponents(gameState.board, false, gameId) });
+        await interaction.editReply({ content: null, embeds: [embed], files: [attachment], components: UI.createGameComponents(gameState.board, false, gameId) }).catch(() => null);
         setupAfkTimers(gameState);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error('[Start Error]', e);
+        cleanupGame(gameId);
+    }
 }
 
 function setupAfkTimers(gs) {
@@ -261,7 +296,7 @@ function setupAfkTimers(gs) {
     gs.afkForfeitTimer = setTimeout(async () => {
         const next = gs.turn === 'X' ? 'O' : 'X';
         const winner = gs.players[next]; const loser = gs.players[gs.turn];
-        await db.updateStats(winner.id, 'win'); await db.updateStats(loser.id, 'loss');
+        await db.updateStats(winner.id, 'win').catch(() => null); await db.updateStats(loser.id, 'loss').catch(() => null);
         const chan = client.channels.cache.get(GAME_CHANNEL_ID);
         if (chan) chan.send({ embeds: [UI.createAfkForfeit(loser, winner)], components: [UI.createReplayButton(gs.players.X.id, gs.players.O.id)] }).catch(() => null);
         cleanupGame(gs.id);
