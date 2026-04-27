@@ -28,7 +28,7 @@ const GAME_CHANNEL_ID = '1498406160204828742';
 const BYPASS_ROLE_ID  = '795466540140986368';
 const AFK_WARNING_MS  = 45_000;
 const AFK_FORFEIT_MS  = 60_000;
-const COOLDOWN_MS     = 120_000; // 2 minutes — anti-spam
+const COOLDOWN_MS     = 60_000; // 1 minute — balanced
 const GAME_TTL_MS     = 300_000; // 5 min hard TTL
 
 const EMOJIS = {
