@@ -5,7 +5,12 @@ const commands = [
     new SlashCommandBuilder()
         .setName('tictactoe')
         .setDescription('Challenge someone to a Tic Tac Toe battle!')
-        .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
+        .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true))
+        .addIntegerOption(opt => opt.setName('size').setDescription('Grid size: 3x3, 6x6, or 9x9').addChoices(
+            { name: '3x3 (Standard)', value: 3 },
+            { name: '6x6 (Pro)', value: 6 },
+            { name: '9x9 (God)', value: 9 }
+        ).setRequired(false)),
     
     new SlashCommandBuilder()
         .setName('leaderboard')

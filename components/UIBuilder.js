@@ -1,4 +1,4 @@
-const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, StringSelectMenuBuilder } = require('discord.js');
 
 class UIBuilder {
     constructor(emojis, client) {
@@ -33,31 +33,58 @@ class UIBuilder {
         return { title: 'UNRANKED', color: '#6b7280' };
     }
 
-    createGameButtons(board, disabled = false, gameId = '') {
-        const rows = [];
-        for (let r = 0; r < 3; r++) {
-            const row = new ActionRowBuilder();
-            for (let c = 0; c < 3; c++) {
-                const cell = board[r][c];
-                const getSafeEmoji = (pref, fallback) => {
-                    if (!pref || pref.length < 10) return fallback;
-                    return pref.replace(/[^\d]/g, '');
-                };
-                let emojiToUse;
-                if (cell === 'X') emojiToUse = getSafeEmoji(this.emojis.X, '❌');
-                else if (cell === 'O') emojiToUse = getSafeEmoji(this.emojis.O, '⭕');
-                else emojiToUse = getSafeEmoji(this.emojis.EMPTY, '➖');
+    createGameComponents(board, disabled = false, gameId = '') {
+        const gridSize = board.length;
 
-                const button = new ButtonBuilder()
-                    .setCustomId(`${gameId}_${r}_${c}`)
-                    .setEmoji(emojiToUse)
-                    .setStyle(cell ? (cell === 'X' ? ButtonStyle.Primary : ButtonStyle.Danger) : ButtonStyle.Secondary)
-                    .setDisabled(disabled || !!cell);
-                row.addComponents(button);
+        // ── 3x3 MODE (Buttons) ────────────────────────────────────────────────
+        if (gridSize === 3) {
+            const rows = [];
+            for (let r = 0; r < 3; r++) {
+                const row = new ActionRowBuilder();
+                for (let c = 0; c < 3; c++) {
+                    const cell = board[r][c];
+                    const getSafeEmoji = (pref, fallback) => {
+                        if (!pref || pref.length < 10) return fallback;
+                        return pref.replace(/[^\d]/g, '');
+                    };
+                    let emojiToUse;
+                    if (cell === 'X') emojiToUse = getSafeEmoji(this.emojis.X, '❌');
+                    else if (cell === 'O') emojiToUse = getSafeEmoji(this.emojis.O, '⭕');
+                    else emojiToUse = getSafeEmoji(this.emojis.EMPTY, '➖');
+
+                    row.addComponents(
+                        new ButtonBuilder()
+                            .setCustomId(`${gameId}_${r}_${c}`)
+                            .setEmoji(emojiToUse)
+                            .setStyle(cell ? (cell === 'X' ? ButtonStyle.Primary : ButtonStyle.Danger) : ButtonStyle.Secondary)
+                            .setDisabled(disabled || !!cell)
+                    );
+                }
+                rows.push(row);
             }
-            rows.push(row);
+            return rows;
         }
-        return rows;
+
+        // ── 6x6 & 9x9 MODE (Select Menus) ──────────────────────────────────────
+        const rowSelect = new StringSelectMenuBuilder()
+            .setCustomId(`${gameId}_row`)
+            .setPlaceholder('Select Row (1-9)')
+            .setDisabled(disabled);
+
+        const colSelect = new StringSelectMenuBuilder()
+            .setCustomId(`${gameId}_col`)
+            .setPlaceholder('Select Column (A-I)')
+            .setDisabled(disabled);
+
+        for (let i = 0; i < gridSize; i++) {
+            rowSelect.addOptions({ label: `Row ${i + 1}`, value: i.toString() });
+            colSelect.addOptions({ label: `Column ${String.fromCharCode(65 + i)}`, value: i.toString() });
+        }
+
+        return [
+            new ActionRowBuilder().addComponents(rowSelect),
+            new ActionRowBuilder().addComponents(colSelect)
+        ];
     }
 
     createGameStatusEmbed(playerX, playerO, turn, winner = null, isDraw = false, attachmentName = 'board_v2.png') {
@@ -171,13 +198,12 @@ class UIBuilder {
             .setFooter({ text: 'Updated every match' });
     }
 
-    createReplayButton(player1Id, player2Id) {
-        const rematchId = this.resolveEmoji(this.emojis.REMATCH, '🎮', true);
+    createReplayButton(p1Id, p2Id, size = 3) {
         return new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`replay_${player1Id}_${player2Id}`)
+                .setCustomId(`replay_${p1Id}_${p2Id}_${size}`)
                 .setLabel('Rematch')
-                .setEmoji(rematchId)
+                .setEmoji(this.formatEmoji(this.emojis.REMATCH, '🎮'))
                 .setStyle(ButtonStyle.Success)
         );
     }
