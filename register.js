@@ -9,12 +9,20 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('leaderboard')
-        .setDescription('🏆 View the Hall of Legends leaderboard'),
+        .setDescription('🏆 View the global Hall of Legends'),
+
+    new SlashCommandBuilder()
+        .setName('weekly')
+        .setDescription('🔥 View the top warriors of the current week'),
+
+    new SlashCommandBuilder()
+        .setName('rewards')
+        .setDescription('💰 Information about weekly/monthly rewards'),
     
     new SlashCommandBuilder()
         .setName('profile')
         .setDescription('📊 View your Arena profile card (or someone else\'s)')
-        .addUserOption(opt => opt.setName('user').setDescription('Player to look up (leave empty for yourself').setRequired(false)),
+        .addUserOption(opt => opt.setName('user').setDescription('Player to look up').setRequired(false)),
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);

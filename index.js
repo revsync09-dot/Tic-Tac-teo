@@ -20,6 +20,7 @@ const cooldowns    = new Map();   // userId → expiresAt (ms)
 const activeUsers  = new Set();   // userIds in a game
 const lockSet      = new Set();   // atomic move locks
 const rematchPending = new Map(); // pairKey → { initiatorId, timer }
+const challengesPending = new Map(); // targetId → { challengerId, timer }
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const GUILD_ID       = process.env.GUILD_ID;
@@ -139,8 +140,57 @@ client.on('interactionCreate', async interaction => {
 
                 const newCd = now + COOLDOWN_MS;
                 cooldowns.set(interaction.user.id, newCd);
-                cooldowns.set(opponent.id, newCd);
-                await startNewGame(interaction, opponent);
+                
+                const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent);
+                const row = UI.createChallengeButtons(interaction.user.id, opponent.id);
+
+                await interaction.reply({
+                    content: `⚔️ <@${opponent.id}>, you have been challenged!`,
+                    embeds: [challengeEmbed],
+                    components: [row]
+                });
+
+                // Challenge expires in 60s
+                const timer = setTimeout(() => {
+                    if (challengesPending.has(opponent.id)) {
+                        challengesPending.delete(opponent.id);
+                        interaction.editReply({ content: '⏳ Challenge expired.', embeds: [], components: [] }).catch(() => null);
+                    }
+                }, 60_000);
+
+                challengesPending.set(opponent.id, { challengerId: interaction.user.id, timer });
+            }
+            // /weekly
+            if (commandName === 'weekly') {
+                await interaction.reply({ content: '🔥 Loading the Weekly Top Warriors...', ephemeral: false }).catch(() => null);
+                try {
+                    const [topPlayers, strongest] = await Promise.all([
+                        db.getWeeklyLeaderboard(), db.getStrongestPlayer()
+                    ]);
+                    const userData = await Promise.all(topPlayers.map(p => client.users.fetch(p.user_id).catch(() => null)));
+                    const buffer = await GameEngine.renderLeaderboard(topPlayers, userData.filter(Boolean), EMOJIS, strongest?.user_id, 'WEEKLY RANKINGS');
+                    const attachment = new AttachmentBuilder(buffer, { name: 'weekly_v2.png' });
+                    await interaction.editReply({ content: null, embeds: [], files: [attachment] });
+                } catch (err) {
+                    console.error('[Weekly Error]', err.message);
+                    await interaction.editReply({ content: '❌ Could not load weekly leaderboard.' }).catch(() => null);
+                }
+            }
+
+            // /rewards
+            if (commandName === 'rewards') {
+                const embed = new EmbedBuilder()
+                    .setColor('#ffd700')
+                    .setTitle('💰 Arena Rewards System')
+                    .setDescription(
+                        `🥇 **Weekly Champion:** 10,000 Points + Custom Role\n` +
+                        `🥈 **Runner Up:** 5,000 Points\n` +
+                        `🥉 **Third Place:** 2,500 Points\n\n` +
+                        `📅 **Reset Info:** Weekly points reset every Monday at 00:00 UTC.\n` +
+                        `🏆 *Monthly Rewards are coming soon! Keep climbing!*`
+                    )
+                    .setFooter({ text: 'Hyperions Arena • v2.1' });
+                return interaction.reply({ embeds: [embed] }).catch(() => null);
             }
 
             // /leaderboard
@@ -195,6 +245,39 @@ client.on('interactionCreate', async interaction => {
 
         // ── BUTTONS ───────────────────────────────────────────────────────────
         if (interaction.isButton()) {
+
+            // ACCEPT BATTLE button
+            if (interaction.customId.startsWith('accept_battle_')) {
+                const parts = interaction.customId.split('_');
+                const challengerId = parts[2], targetId = parts[3];
+                
+                if (interaction.user.id !== targetId) {
+                    return interaction.reply({ content: '❌ You are not the target of this challenge!', ephemeral: true }).catch(() => null);
+                }
+
+                if (!challengesPending.has(targetId)) {
+                    return interaction.reply({ content: '⏳ Challenge expired or already accepted.', ephemeral: true }).catch(() => null);
+                }
+
+                const pending = challengesPending.get(targetId);
+                clearTimeout(pending.timer);
+                challengesPending.delete(targetId);
+
+                if (activeUsers.has(challengerId) || activeUsers.has(targetId)) {
+                    return interaction.reply({ content: '⚔️ One of the players is already in a game!', ephemeral: true }).catch(() => null);
+                }
+
+                await interaction.deferUpdate().catch(() => null);
+                const challenger = await client.users.fetch(challengerId).catch(() => null);
+                if (!challenger) return;
+
+                // Set cooldown for BOTH on start
+                const newCd = Date.now() + COOLDOWN_MS;
+                cooldowns.set(challengerId, newCd);
+                cooldowns.set(targetId, newCd);
+
+                return startNewGame(interaction, challenger);
+            }
 
             // REMATCH button — mutual confirmation required
             if (interaction.customId.startsWith('replay_')) {

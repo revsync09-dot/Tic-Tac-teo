@@ -194,6 +194,30 @@ class UIBuilder {
             )
             .setTimestamp();
     }
+
+    createChallengeEmbed(challenger, target) {
+        const emojiWin = this.formatEmoji(this.emojis.WIN, '🏆');
+        return new EmbedBuilder()
+            .setColor('#5865F2')
+            .setTitle(`${emojiWin} BATTLE REQUEST`)
+            .setDescription(
+                `🔥 **Challenger:** <@${challenger.id}>\n` +
+                `🎯 **Target:** <@${target.id}>\n\n` +
+                `Do you accept this duel? You have **60 seconds** to respond!`
+            )
+            .setThumbnail(target.displayAvatarURL())
+            .setFooter({ text: 'Hyperions Arena Duel' });
+    }
+
+    createChallengeButtons(challengerId, targetId) {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`accept_battle_${challengerId}_${targetId}`)
+                .setLabel('Accept Duel')
+                .setEmoji('⚔️')
+                .setStyle(ButtonStyle.Primary)
+        );
+    }
 }
 
 module.exports = UIBuilder;

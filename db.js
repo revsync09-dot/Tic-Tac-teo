@@ -33,21 +33,28 @@ async function updateStats(userId, result) {
             .maybeSingle();
 
         const oldRank = getRankTitle(current?.points || 0);
+        const now = new Date();
+        const currentWeek = getISOWeek(now);
+        const oldMatchWeek = current?.last_match_week || 0;
+
         const stats = {
             user_id: userId,
             wins: current?.wins || 0,
             losses: current?.losses || 0,
             draws: current?.draws || 0,
             points: current?.points || 0,
+            weekly_points: (currentWeek !== oldMatchWeek) ? 0 : (current?.weekly_points || 0),
+            last_match_week: currentWeek,
             current_streak: current?.current_streak || 0,
             highest_streak: current?.highest_streak || 0,
-            last_match: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+            last_match: now.toISOString(),
+            updated_at: now.toISOString()
         };
 
         if (result === 'win') {
             stats.wins += 1;
             stats.points += 3;
+            stats.weekly_points += 3;
             stats.current_streak += 1;
             if (stats.current_streak > stats.highest_streak) {
                 stats.highest_streak = stats.current_streak;
@@ -55,7 +62,11 @@ async function updateStats(userId, result) {
         } else {
             stats.current_streak = 0;
             if (result === 'loss') stats.losses += 1;
-            else if (result === 'draw') { stats.draws += 1; stats.points += 1; }
+            else if (result === 'draw') { 
+                stats.draws += 1; 
+                stats.points += 1; 
+                stats.weekly_points += 1;
+            }
         }
 
         const { data, error } = await supabase
@@ -94,12 +105,13 @@ async function getUserStats(userId) {
     }
 }
 
-async function getLeaderboard() {
+async function getLeaderboard(type = 'global') {
     try {
+        const column = type === 'weekly' ? 'weekly_points' : 'points';
         const { data, error } = await supabase
             .from('rankings')
             .select('*')
-            .order('points', { ascending: false })
+            .order(column, { ascending: false })
             .limit(10);
         if (error) throw error;
         return data || [];
@@ -107,6 +119,14 @@ async function getLeaderboard() {
         console.error('[DB] Leaderboard fetch failed:', err.message);
         return [];
     }
+}
+
+function getISOWeek(d) {
+    d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    var weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+    return weekNo;
 }
 
 async function getStrongestPlayer() {
@@ -151,5 +171,6 @@ async function getUserRank(userId) {
 module.exports = { 
     updateStats, getUserStats, getLeaderboard, getStrongestPlayer, 
     getTotalGames, getUserRank, getRankTitle,
+    getWeeklyLeaderboard: () => getLeaderboard('weekly'),
     checkHealth: () => isDbHealthy
 };

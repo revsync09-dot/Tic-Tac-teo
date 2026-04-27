@@ -184,7 +184,7 @@ class GameEngine {
         return canvas.toBuffer();
     }
 
-    async renderLeaderboard(topPlayers, users, emojis, strongestPlayerId) {
+    async renderLeaderboard(topPlayers, users, emojis, strongestPlayerId, customTitle = 'HALL OF LEGENDS') {
         const width = 800, height = 700;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
@@ -205,7 +205,7 @@ class GameEngine {
         
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 40px sans-serif';
-        ctx.fillText('HALL OF LEGENDS', winEmojiImg ? 110 : 50, 70);
+        ctx.fillText(customTitle, winEmojiImg ? 110 : 50, 70);
 
         ctx.fillStyle = 'rgba(255,255,255,0.35)';
         ctx.font = '18px sans-serif';
