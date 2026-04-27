@@ -6,28 +6,31 @@ class UIBuilder {
         this.client = client;
         this.accentColor = '#5865F2';
         this.ranks = [
-            { min: 100, title: 'GOD' },
-            { min: 50, title: 'LEGEND' },
-            { min: 20, title: 'ELITE' },
-            { min: 0, title: 'ROOKIE' }
+            { min: 100, title: 'GOD',     color: '#ff0055' },
+            { min: 50,  title: 'LEGEND',  color: '#a855f7' },
+            { min: 20,  title: 'ELITE',   color: '#3b82f6' },
+            { min: 0,   title: 'ROOKIE',  color: '#22c55e' }
         ];
     }
 
     resolveEmoji(id, fallback, forceRawId = false) {
         if (!id || id.length < 10) return fallback;
         const cleanId = id.replace(/[^\d]/g, '');
-        
         if (forceRawId) return cleanId;
-
         const found = this.client.emojis.cache.get(cleanId);
         if (found) return found.toString();
-        
-        // Force the embed to try rendering it even if not in cache
         return `<:custom:${cleanId}>`;
     }
 
     formatEmoji(id, fallback) {
         return this.resolveEmoji(id, fallback);
+    }
+
+    getRank(points) {
+        for (const r of this.ranks) {
+            if (points >= r.min) return r;
+        }
+        return { title: 'UNRANKED', color: '#6b7280' };
     }
 
     createGameButtons(board, disabled = false, gameId = '') {
@@ -36,12 +39,11 @@ class UIBuilder {
             const row = new ActionRowBuilder();
             for (let c = 0; c < 3; c++) {
                 const cell = board[r][c];
-                let emojiToUse;
                 const getSafeEmoji = (pref, fallback) => {
                     if (!pref || pref.length < 10) return fallback;
-                    return pref.replace(/[^\d]/g, ''); // Always use the raw ID for buttons
+                    return pref.replace(/[^\d]/g, '');
                 };
-
+                let emojiToUse;
                 if (cell === 'X') emojiToUse = getSafeEmoji(this.emojis.X, '❌');
                 else if (cell === 'O') emojiToUse = getSafeEmoji(this.emojis.O, '⭕');
                 else emojiToUse = getSafeEmoji(this.emojis.EMPTY, '➖');
@@ -70,21 +72,17 @@ class UIBuilder {
             .setImage(`attachment://${attachmentName}`);
 
         let description = `**Matchup:**\n${emojiX} <@${playerX.id}> **vs** ${emojiO} <@${playerO.id}>\n\n`;
-
         if (winner) {
-            description += `🏆 **VICTORY!**\n<@${winner.id}> has claimed the throne!\n` +
-                           `${emojiPoints} **Rewards:** +3 Points | Streak Increased!`;
+            description += `🏆 **VICTORY!**\n<@${winner.id}> has claimed the throne!\n${emojiPoints} **+3 Points** added to your rank!`;
             embed.setColor('#43b581');
         } else if (isDraw) {
-            description += `🤝 **STALEMATE!**\nThe battle ends in a draw.\n` +
-                           `${emojiPoints} **Rewards:** +1 Point for both warriors.`;
+            description += `🤝 **STALEMATE!**\nA legendary draw.\n${emojiPoints} **+1 Point** for both warriors.`;
             embed.setColor('#747f8d');
         } else {
-            description += `👉 **Current Turn:** <@${turn.id}>\nMake your move immediately to secure victory!`;
+            description += `👉 **Turn:** <@${turn.id}> — Make your move!`;
         }
-
         embed.setDescription(description);
-        embed.setFooter({ text: 'Hyperions Arena • v2.1 Nokia-Stability Mode' });
+        embed.setFooter({ text: 'Hyperions Arena • v2.1' });
         return embed;
     }
 
@@ -93,21 +91,69 @@ class UIBuilder {
         const emojiRank = this.formatEmoji(this.emojis.RANK, '🏅');
         const emojiPoints = this.formatEmoji(this.emojis.POINTS, '💰');
         const emojiStreak = this.formatEmoji(this.emojis.STREAK, '🔥');
-        const rank = this.getRankTitle(points);
-        
+        const rank = this.getRank(points);
+
         return new EmbedBuilder()
             .setColor('#ffd700')
             .setTitle(`${emojiWin} WE HAVE A CHAMPION!`)
             .setDescription(
                 `👑 **Winner:** <@${winner.id}>\n` +
-                `${emojiRank} **Rank:** \`${rank}\`\n` +
+                `${emojiRank} **Rank:** \`${rank.title}\`\n` +
                 `${emojiStreak} **Current Streak:** ${streak}\n` +
                 `${emojiPoints} **Points Earned:** +3\n\n` +
-                `📊 **Match Stats:**\n` +
-                `└ Moves: ${matchStats.moves || '?'}\n` +
-                `└ Duration: ${matchStats.duration || '?'}s`
+                `📊 **Match:** ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n\n` +
+                `Use \`/profile\` to see your full stats!`
             )
             .setFooter({ text: 'Tournament Level Match' })
+            .setTimestamp();
+    }
+
+    // ─── FEATURE: RANK UP ──────────────────────────────────────────────────
+    createRankUpAnnouncement(user, oldRank, newRank) {
+        const colors = { GOD: '#ff0055', LEGEND: '#a855f7', ELITE: '#3b82f6', ROOKIE: '#22c55e' };
+        return new EmbedBuilder()
+            .setColor(colors[newRank] || '#ffffff')
+            .setTitle('⚡ RANK UP!')
+            .setDescription(
+                `🎉 **Congratulations** <@${user.id}>!\n\n` +
+                `You have advanced from **${oldRank}** → **${newRank}**!\n` +
+                `Keep climbing — the \`GOD\` tier awaits you!`
+            )
+            .setTimestamp();
+    }
+
+    // ─── FEATURE: STREAK MILESTONE ─────────────────────────────────────────
+    createStreakMilestoneAnnouncement(user, streak) {
+        const emojiStreak = this.formatEmoji(this.emojis.STREAK, '🔥');
+        return new EmbedBuilder()
+            .setColor('#ff4500')
+            .setTitle(`${emojiStreak} UNSTOPPABLE STREAK!`)
+            .setDescription(
+                `🔥 <@${user.id}> has reached a **${streak} WIN STREAK**!\n\n` +
+                `${streak >= 10 ? '👑 **LEGENDARY PERFORMANCE!** Is anyone able to stop this warrior?' : '⚡ Can they keep it going?'}`
+            )
+            .setTimestamp();
+    }
+
+    // ─── FEATURE: AFK WARNING ──────────────────────────────────────────────
+    createAfkWarning(player, seconds) {
+        return new EmbedBuilder()
+            .setColor('#f59e0b')
+            .setTitle('⏳ AFK Warning!')
+            .setDescription(
+                `<@${player.id}> you have **${seconds} seconds** to make your move!\n` +
+                `Fail to move and you will **forfeit the game!**`
+            );
+    }
+
+    createAfkForfeit(player, winner) {
+        return new EmbedBuilder()
+            .setColor('#ef4444')
+            .setTitle('💀 AFK Forfeit!')
+            .setDescription(
+                `<@${player.id}> did not respond in time!\n\n` +
+                `🏆 <@${winner.id}> wins by **forfeit**!`
+            )
             .setTimestamp();
     }
 
@@ -118,7 +164,7 @@ class UIBuilder {
             .setTitle(`${emojiCrown} Hall of Legends`)
             .setDescription(
                 `The top Tic Tac Toe legends of Hyperions.\n\n` +
-                `🌍 **Global Players:** ${totalPlayers}\n` +
+                `🌍 **Registered Players:** ${totalPlayers}\n` +
                 `🎯 **Your Rank:** #${userRank}`
             )
             .setImage(`attachment://${attachmentName}`)
@@ -136,22 +182,15 @@ class UIBuilder {
         );
     }
 
-    getRankTitle(points) {
-        for (const r of this.ranks) {
-            if (points >= r.min) return r.title;
-        }
-        return 'UNRANKED';
-    }
-
     createDrawAnnouncement(player1, player2) {
-        const emojiDraw = this.formatEmoji(this.emojis.DRAW, '🤝');
         const emojiPoints = this.formatEmoji(this.emojis.POINTS, '💰');
         return new EmbedBuilder()
             .setColor('#747f8d')
-            .setTitle(`${emojiDraw} LEGENDARY STALEMATE`)
+            .setTitle('🤝 LEGENDARY STALEMATE')
             .setDescription(
                 `🤝 **Warriors:** <@${player1.id}> & <@${player2.id}>\n` +
-                `${emojiPoints} **Points Earned:** +1 each`
+                `${emojiPoints} **+1 Point** for both players\n\n` +
+                `Use \`/profile\` to see your stats!`
             )
             .setTimestamp();
     }

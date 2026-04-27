@@ -1,37 +1,46 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY
-);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 let isDbHealthy = true;
 
+const RANK_THRESHOLDS = [
+    { min: 100, title: 'GOD' },
+    { min: 50,  title: 'LEGEND' },
+    { min: 20,  title: 'ELITE' },
+    { min: 0,   title: 'ROOKIE' }
+];
+
+const STREAK_MILESTONES = [3, 5, 10, 15, 20, 30, 50];
+
+function getRankTitle(points) {
+    for (const r of RANK_THRESHOLDS) {
+        if (points >= r.min) return r.title;
+    }
+    return 'UNRANKED';
+}
+
 /**
- * Updates a user's stats in the database.
- * @param {string} userId Discord User ID
- * @param {'win' | 'loss' | 'draw'} result 
- * @returns {Promise<any>} The updated stats
+ * Returns { data, rankUp: bool, newRank, milestoneStreak }
  */
 async function updateStats(userId, result) {
     const start = Date.now();
     try {
-        const { data: current, error: fetchError } = await supabase
+        const { data: current } = await supabase
             .from('rankings')
             .select('*')
             .eq('user_id', userId)
             .maybeSingle();
 
-        if (fetchError) throw fetchError;
-
+        const oldRank = getRankTitle(current?.points || 0);
         const stats = {
             user_id: userId,
-            wins: (current?.wins || 0),
-            losses: (current?.losses || 0),
-            draws: (current?.draws || 0),
-            points: (current?.points || 0),
-            current_streak: (current?.current_streak || 0),
-            highest_streak: (current?.highest_streak || 0),
+            wins: current?.wins || 0,
+            losses: current?.losses || 0,
+            draws: current?.draws || 0,
+            points: current?.points || 0,
+            current_streak: current?.current_streak || 0,
+            highest_streak: current?.highest_streak || 0,
             last_match: new Date().toISOString(),
             updated_at: new Date().toISOString()
         };
@@ -46,26 +55,41 @@ async function updateStats(userId, result) {
         } else {
             stats.current_streak = 0;
             if (result === 'loss') stats.losses += 1;
-            else if (result === 'draw') {
-                stats.draws += 1;
-                stats.points += 1;
-            }
+            else if (result === 'draw') { stats.draws += 1; stats.points += 1; }
         }
 
-        const { data, error: upsertError } = await supabase
+        const { data, error } = await supabase
             .from('rankings')
             .upsert(stats, { onConflict: 'user_id' })
             .select()
             .single();
 
-        if (upsertError) throw upsertError;
-        
-        console.log(`[DB] Saved ${result.toUpperCase()} for ${userId} (${Date.now() - start}ms)`);
+        if (error) throw error;
+
+        const newRank = getRankTitle(data.points);
+        const rankUp = (oldRank !== newRank) && result === 'win';
+        const milestoneStreak = STREAK_MILESTONES.includes(data.current_streak) ? data.current_streak : null;
+
+        console.log(`[DB] ${result.toUpperCase()} for ${userId} → ${data.points}pts, rank: ${newRank} (${Date.now()-start}ms)`);
         isDbHealthy = true;
-        return data;
+        return { data, rankUp, newRank, milestoneStreak };
     } catch (err) {
         isDbHealthy = false;
-        console.error(`[DB Error] Update failed for ${userId}:`, err.message);
+        console.error(`[DB Error] ${userId}:`, err.message);
+        return { data: null, rankUp: false, newRank: null, milestoneStreak: null };
+    }
+}
+
+async function getUserStats(userId) {
+    try {
+        const { data, error } = await supabase
+            .from('rankings')
+            .select('*')
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (error) throw error;
+        return data;
+    } catch (e) {
         return null;
     }
 }
@@ -80,7 +104,7 @@ async function getLeaderboard() {
         if (error) throw error;
         return data || [];
     } catch (err) {
-        console.error('[DB Error] Fetch failed:', err.message);
+        console.error('[DB] Leaderboard fetch failed:', err.message);
         return [];
     }
 }
@@ -95,9 +119,7 @@ async function getStrongestPlayer() {
             .maybeSingle();
         if (error) throw error;
         return data;
-    } catch (err) {
-        return null;
-    }
+    } catch { return null; }
 }
 
 async function getTotalGames() {
@@ -107,9 +129,7 @@ async function getTotalGames() {
             .select('*', { count: 'exact', head: true });
         if (error) throw error;
         return count || 0;
-    } catch (e) {
-        return 0;
-    }
+    } catch { return 0; }
 }
 
 async function getUserRank(userId) {
@@ -125,16 +145,11 @@ async function getUserRank(userId) {
             .select('*', { count: 'exact', head: true })
             .gt('points', data.points);
         return (count || 0) + 1;
-    } catch (e) {
-        return 'N/A';
-    }
+    } catch { return 'N/A'; }
 }
 
 module.exports = { 
-    updateStats, 
-    getLeaderboard, 
-    getStrongestPlayer, 
-    getTotalGames, 
-    getUserRank,
+    updateStats, getUserStats, getLeaderboard, getStrongestPlayer, 
+    getTotalGames, getUserRank, getRankTitle,
     checkHealth: () => isDbHealthy
 };
