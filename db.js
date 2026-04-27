@@ -112,7 +112,7 @@ async function getLeaderboard(type = 'global') {
             .from('rankings')
             .select('*')
             .order(column, { ascending: false })
-            .limit(10);
+            .limit(15);
         if (error) throw error;
         return data || [];
     } catch (err) {
@@ -134,7 +134,7 @@ async function getStrongestPlayer() {
         const { data, error } = await supabase
             .from('rankings')
             .select('*')
-            .order('highest_streak', { ascending: false })
+            .order('points', { ascending: false })
             .limit(1)
             .maybeSingle();
         if (error) throw error;

@@ -113,7 +113,7 @@ class GameEngine {
     }
 
     async renderLeaderboard(topPlayers, users, emojis, strongestPlayerId, customTitle = 'HALL OF LEGENDS') {
-        const width = 800, height = 700;
+        const width = 800, height = 1500;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#1a1c23'; ctx.fillRect(0, 0, width, height);
