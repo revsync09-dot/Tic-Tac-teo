@@ -137,7 +137,9 @@ client.on('interactionCreate', async interaction => {
                     return interaction.reply({ content: `⚔️ <@${opponent.id}> is already in a game!`, ephemeral: true }).catch(() => null);
                 }
 
-                cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
+                const newCd = now + COOLDOWN_MS;
+                cooldowns.set(interaction.user.id, newCd);
+                cooldowns.set(opponent.id, newCd);
                 await startNewGame(interaction, opponent);
             }
 
@@ -208,6 +210,16 @@ client.on('interactionCreate', async interaction => {
                 const pairKey = [p1Id, p2Id].sort().join('_');
                 const opponentId = clickerId === p1Id ? p2Id : p1Id;
 
+                // ── COOLDOWN CHECK (FIX: Check before rematch)
+                const now = Date.now();
+                const cd = cooldowns.get(clickerId) || 0;
+                if (now < cd) {
+                    return interaction.reply({
+                        content: `⏳ Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s** before starting a new battle.`,
+                        ephemeral: true
+                    }).catch(() => null);
+                }
+
                 if (rematchPending.has(pairKey)) {
                     const pending = rematchPending.get(pairKey);
 
@@ -230,6 +242,12 @@ client.on('interactionCreate', async interaction => {
                     await interaction.deferUpdate().catch(() => null);
                     const opponent = await client.users.fetch(opponentId).catch(() => null);
                     if (!opponent) return;
+
+                    // Set cooldown for BOTH players on start
+                    const newCd = Date.now() + COOLDOWN_MS;
+                    cooldowns.set(p1Id, newCd);
+                    cooldowns.set(p2Id, newCd);
+
                     return startNewGame(interaction, opponent);
 
                 } else {
