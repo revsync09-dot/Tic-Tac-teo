@@ -134,13 +134,28 @@ class UIBuilder {
     }
 
     createChallengeEmbed(challenger, target, gameName = 'Tic Tac Toe') {
-        const emojiWin = this.formatEmoji(this.emojis.WIN, '🏆');
+        const titleEmoji = this.formatEmoji(this.emojis.UI_TITLE, '⚔️');
+        const gameEmoji = this.formatEmoji(this.emojis.UI_GAME, '🎮');
+        const infoEmoji = this.formatEmoji(this.emojis.UI_INFO, '❗');
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
+        
         return new EmbedBuilder()
-            .setColor('#5865F2')
-            .setTitle(`${emojiWin} BATTLE REQUEST`)
-            .setDescription(`🔥 <@${challenger.id}> challenged <@${target.id}> to **${gameName}**!\n\nDo you accept? (Expires in 60s)`)
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\` BATTLE REQUEST \`**\n\n` +
+                `┃ ${gameEmoji} **\` Game Type \`**\n` +
+                `┃ ${infoEmoji} **\` ${gameName} \`**\n\n` +
+                `┃ ${gearEmoji} **\` Duel Details \`**\n` +
+                `\`\`\`diff\n` +
+                `+ Challenger: @${challenger.username}\n` +
+                `+ Target:     @${target.username}\n` +
+                `+ Expires:    in 60 seconds\n` +
+                `\`\`\`\n` +
+                `**\` WAITING FOR TARGET \`**\n` +
+                `┃ 🔗 **\` Click Accept Duel below to start \`**`
+            )
             .setThumbnail(target.displayAvatarURL())
-            .setFooter({ text: 'Hyperions Arena Duel' });
+            .setTimestamp();
     }
 
     createChallengeButtons(challengerId, targetId, gameType = 'tictactoe') {

@@ -49,7 +49,12 @@ const EMOJIS = {
     RPS_PAPER:    process.env.EMOJI_RPS_PAPER    || '📄',
     RPS_SCISSORS: process.env.EMOJI_RPS_SCISSORS || '✂️',
     RPS_HIDDEN:   process.env.EMOJI_RPS_HIDDEN   || '❓',
-    RPS_READY:    process.env.EMOJI_RPS_READY    || '✅'
+    RPS_READY:    process.env.EMOJI_RPS_READY    || '✅',
+
+    UI_TITLE: process.env.EMOJI_UI_TITLE || '⚔️',
+    UI_GAME:  process.env.EMOJI_UI_GAME  || '🎮',
+    UI_INFO:  process.env.EMOJI_UI_INFO  || '❗',
+    UI_GEAR:  process.env.EMOJI_UI_GEAR  || '⚙️'
 };
 
 const UI = new UIBuilder(EMOJIS, client);
