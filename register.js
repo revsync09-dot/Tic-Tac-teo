@@ -8,6 +8,16 @@ const commands = [
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
     
     new SlashCommandBuilder()
+        .setName('connect4')
+        .setDescription('Challenge someone to Vier Gewinnt (Connect 4)!')
+        .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('rps')
+        .setDescription('Challenge someone to Best-of-3 Schere-Stein-Papier!')
+        .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
+        
+    new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('🏆 View the global Hall of Legends'),
 

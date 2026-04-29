@@ -39,7 +39,17 @@ const EMOJIS = {
     SUCCESS: process.env.EMOJI_SUCCESS || '1480578220003819726', 
     ERROR:   process.env.EMOJI_ERROR   || '❌',
     EMPTY:   process.env.EMOJI_EMPTY   || '➖',
-    STATS:   process.env.EMOJI_STATS   || '1480578098952142999'
+    STATS:   process.env.EMOJI_STATS   || '1480578098952142999',
+    
+    C4_RED:    process.env.EMOJI_C4_RED    || '🔴',
+    C4_YELLOW: process.env.EMOJI_C4_YELLOW || '🟡',
+    C4_EMPTY:  process.env.EMOJI_C4_EMPTY  || '⚫',
+
+    RPS_ROCK:     process.env.EMOJI_RPS_ROCK     || '🪨',
+    RPS_PAPER:    process.env.EMOJI_RPS_PAPER    || '📄',
+    RPS_SCISSORS: process.env.EMOJI_RPS_SCISSORS || '✂️',
+    RPS_HIDDEN:   process.env.EMOJI_RPS_HIDDEN   || '❓',
+    RPS_READY:    process.env.EMOJI_RPS_READY    || '✅'
 };
 
 const UI = new UIBuilder(EMOJIS, client);
@@ -64,7 +74,7 @@ client.on('interactionCreate', async interaction => {
 
             const { commandName } = interaction;
 
-            if (commandName === 'tictactoe') {
+            if (['tictactoe', 'connect4', 'rps'].includes(commandName)) {
                 const now = Date.now();
                 const cd = cooldowns.get(interaction.user.id) || 0;
                 if (now < cd) return interaction.reply({ content: `⏳ Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s**.`, ephemeral: true }).catch(() => null);
@@ -76,8 +86,9 @@ client.on('interactionCreate', async interaction => {
 
                 cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
                 
-                const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent);
-                const row = UI.createChallengeButtons(interaction.user.id, opponent.id);
+                const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Vier Gewinnt', rps: 'Schere-Stein-Papier' };
+                const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent, gameNames[commandName]);
+                const row = UI.createChallengeButtons(interaction.user.id, opponent.id, commandName);
                 await interaction.reply({ content: `⚔️ <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
 
                 const timer = setTimeout(() => {
@@ -86,7 +97,7 @@ client.on('interactionCreate', async interaction => {
                         interaction.editReply({ content: '⏳ Challenge expired.', embeds: [], components: [] }).catch(() => null);
                     }
                 }, 60_000);
-                challengesPending.set(opponent.id, { challengerId: interaction.user.id, timer });
+                challengesPending.set(opponent.id, { challengerId: interaction.user.id, timer, type: commandName });
             }
 
             if (commandName === 'leaderboard') {
@@ -129,9 +140,9 @@ client.on('interactionCreate', async interaction => {
         if (interaction.isButton()) {
             
             // ACCEPT BATTLE button
-            if (interaction.customId.startsWith('accept_battle_')) {
+            if (interaction.customId.startsWith('accept_')) {
                 const parts = interaction.customId.split('_');
-                const challengerId = parts[2], targetId = parts[3];
+                const gameType = parts[1], challengerId = parts[2], targetId = parts[3];
                 if (interaction.user.id !== targetId) return interaction.reply({ content: '❌ This is not your challenge!', ephemeral: true }).catch(() => null);
                 
                 // Prevent spam clicks
@@ -139,7 +150,7 @@ client.on('interactionCreate', async interaction => {
                 challengeLocks.add(targetId);
 
                 const pending = challengesPending.get(targetId);
-                if (!pending || pending.challengerId !== challengerId) {
+                if (!pending || pending.challengerId !== challengerId || pending.type !== gameType) {
                     challengeLocks.delete(targetId);
                     return interaction.reply({ content: '⏳ Challenge expired or invalid.', ephemeral: true }).catch(() => null);
                 }
@@ -160,7 +171,7 @@ client.on('interactionCreate', async interaction => {
                 cooldowns.set(challengerId, newCd); cooldowns.set(targetId, newCd);
                 
                 try {
-                    await startNewGame(interaction, challenger);
+                    await startNewGame(interaction, challenger, gameType);
                 } finally {
                     challengeLocks.delete(targetId);
                 }
@@ -188,98 +199,260 @@ client.on('interactionCreate', async interaction => {
                     
                     await interaction.deferUpdate().catch(() => null);
                     const opponent = await client.users.fetch(opponentId).catch(() => null);
-                    return startNewGame(interaction, opponent);
+                    return startNewGame(interaction, opponent, pending.gameType || 'tictactoe');
                 } else {
+                    const lastGameType = activeUsers.get(pairKey) || 'tictactoe'; // Fallback
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
-                    rematchPending.set(pairKey, { initiatorId: clickerId, timer });
+                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : 'tictactoe') });
                     return interaction.reply({ content: `🎮 <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
                 }
             }
 
-            // GAME MOVE button
-            const parts = interaction.customId.split('_');
-            if (parts.length !== 3) return;
-            const [gameId, row, col] = parts;
+            // GAME MOVES
+            const customId = interaction.customId;
+            let gameId, action, extraAction;
+            
+            if (customId.startsWith('c4_')) {
+                [, gameId, action] = customId.split('_');
+            } else if (customId.startsWith('rps_')) {
+                [, gameId, action] = customId.split('_');
+            } else {
+                const parts = customId.split('_');
+                if (parts.length === 3) [gameId, action, extraAction] = parts;
+                else return;
+            }
+
             const gameState = games.get(gameId);
             if (!gameState) return interaction.reply({ content: '🏟️ Game expired.', ephemeral: true }).catch(() => null);
 
-            const currentPlayer = gameState.players[gameState.turn];
-            if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
-            
             // Atomic Lock
             if (lockSet.has(gameId)) return;
             lockSet.add(gameId);
 
-            await interaction.deferUpdate().catch(() => null);
-
             try {
-                const r = parseInt(row), c = parseInt(col);
-                if (gameState.board[r][c]) return;
-
-                clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
-                gameState.board[r][c] = gameState.turn;
-                gameState.moveCount++;
-
-                const winnerKey = checkWinner(gameState.board);
-                let resX, resO;
-
-                if (winnerKey) {
-                    gameState.winner = gameState.players[winnerKey];
-                    const loserKey = winnerKey === 'X' ? 'O' : 'X';
-                    [resX, resO] = await Promise.all([db.updateStats(gameState.players[winnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]).catch(() => [null, null]);
-                } else if (isBoardFull(gameState.board)) {
-                    gameState.isDraw = true;
-                    [resX, resO] = await Promise.all([db.updateStats(gameState.players.X.id, 'draw'), db.updateStats(gameState.players.O.id, 'draw')]).catch(() => [null, null]);
-                } else {
-                    gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
-                }
-
-                const strongest = await db.getStrongestPlayer().catch(() => null);
-                const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
-                const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
-                const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw);
-
-                await interaction.editReply({
-                    content: null, embeds: [embed], files: [attachment],
-                    components: UI.createGameComponents(gameState.board, !!(gameState.winner || gameState.isDraw), gameId)
-                }).catch(() => null);
-
-                if (gameState.winner || gameState.isDraw) {
-                    const duration = Math.round((Date.now() - gameState.startTime) / 1000);
-                    const matchStats = { moves: gameState.moveCount, duration };
-                    const replayRow = UI.createReplayButton(gameState.players.X.id, gameState.players.O.id);
-                    if (gameState.winner) {
-                        const winData = winnerKey === 'X' ? resX : resO;
-                        const winEmbed = UI.createVictoryAnnouncement(gameState.winner, winData?.data?.current_streak || 1, winData?.data?.points || 0, matchStats);
-                        await interaction.followUp({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
-                    } else {
-                        await interaction.followUp({ embeds: [UI.createDrawAnnouncement(gameState.players.X, gameState.players.O)], components: [replayRow] }).catch(() => null);
-                    }
-                    cleanupGame(gameId);
-                } else {
-                    setupAfkTimers(gameState);
+                if (gameState.type === 'tictactoe') {
+                    await handleTTTMove(interaction, gameState, action, extraAction);
+                } else if (gameState.type === 'connect4') {
+                    await handleC4Move(interaction, gameState, action);
+                } else if (gameState.type === 'rps') {
+                    await handleRPSMove(interaction, gameState, action);
                 }
             } finally { lockSet.delete(gameId); }
         }
     } catch (e) { console.error('[Fatal Interaction Error]', e); }
 });
 
-async function startNewGame(interaction, opponent) {
+async function handleTTTMove(interaction, gameState, row, col) {
+    const currentPlayer = gameState.players[gameState.turn];
+    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
+    
+    await interaction.deferUpdate().catch(() => null);
+    const r = parseInt(row), c = parseInt(col);
+    if (gameState.board[r][c]) return;
+
+    clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
+    gameState.board[r][c] = gameState.turn;
+    gameState.moveCount++;
+
+    const winnerKey = checkWinnerTTT(gameState.board);
+    let resX, resO;
+
+    if (winnerKey) {
+        gameState.winner = gameState.players[winnerKey];
+        const loserKey = winnerKey === 'X' ? 'O' : 'X';
+        [resX, resO] = await Promise.all([db.updateStats(gameState.players[winnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]).catch(() => [null, null]);
+    } else if (isBoardFullTTT(gameState.board)) {
+        gameState.isDraw = true;
+        [resX, resO] = await Promise.all([db.updateStats(gameState.players.X.id, 'draw'), db.updateStats(gameState.players.O.id, 'draw')]).catch(() => [null, null]);
+    } else {
+        gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
+    }
+
+    const strongest = await db.getStrongestPlayer().catch(() => null);
+    const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
+    const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
+    const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw, 'Tic Tac Toe');
+
+    await interaction.editReply({
+        content: null, embeds: [embed], files: [attachment],
+        components: UI.createGameComponents(gameState.board, !!(gameState.winner || gameState.isDraw), gameState.id)
+    }).catch(() => null);
+
+    await finishGame(interaction, gameState, winnerKey, resX, resO);
+}
+
+async function handleC4Move(interaction, gameState, colStr) {
+    const currentPlayer = gameState.players[gameState.turn];
+    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
+    
+    await interaction.deferUpdate().catch(() => null);
+    const col = parseInt(colStr);
+    
+    let placedRow = -1;
+    for (let r = 5; r >= 0; r--) {
+        if (!gameState.board[r][col]) {
+            gameState.board[r][col] = gameState.turn;
+            placedRow = r;
+            break;
+        }
+    }
+    if (placedRow === -1) return; 
+
+    clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
+    gameState.moveCount++;
+
+    const winnerKey = checkWinnerC4(gameState.board);
+    let resX, resO;
+
+    if (winnerKey) {
+        gameState.winner = gameState.players[winnerKey];
+        const loserKey = winnerKey === 'X' ? 'O' : 'X';
+        [resX, resO] = await Promise.all([db.updateStats(gameState.players[winnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]).catch(() => [null, null]);
+    } else if (isBoardFullC4(gameState.board)) {
+        gameState.isDraw = true;
+        [resX, resO] = await Promise.all([db.updateStats(gameState.players.X.id, 'draw'), db.updateStats(gameState.players.O.id, 'draw')]).catch(() => [null, null]);
+    } else {
+        gameState.turn = gameState.turn === 'X' ? 'O' : 'X';
+    }
+
+    const strongest = await db.getStrongestPlayer().catch(() => null);
+    const buffer = await GameEngine.renderC4Board(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
+    const attachment = new AttachmentBuilder(buffer, { name: 'c4_board.png' });
+    const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw, 'Vier Gewinnt', 'c4_board.png');
+
+    await interaction.editReply({
+        content: null, embeds: [embed], files: [attachment],
+        components: UI.createC4Components(gameState.board, !!(gameState.winner || gameState.isDraw), gameState.id)
+    }).catch(() => null);
+
+    await finishGame(interaction, gameState, winnerKey, resX, resO);
+}
+
+async function handleRPSMove(interaction, gameState, move) {
+    const isPlayerX = interaction.user.id === gameState.players.X.id;
+    const isPlayerO = interaction.user.id === gameState.players.O.id;
+    if (!isPlayerX && !isPlayerO) return interaction.reply({ content: `🚫 **Not your game!**`, ephemeral: true }).catch(() => null);
+    
+    const pKey = isPlayerX ? 'X' : 'O';
+    if (gameState.moves[pKey]) return interaction.reply({ content: `✅ Du hast bereits **${gameState.moves[pKey]}** gewählt. Warte auf den Gegner!`, ephemeral: true }).catch(() => null);
+
+    gameState.moves[pKey] = move;
+    await interaction.reply({ content: `✅ Move locked: **${move}**.`, ephemeral: true }).catch(() => null);
+
+    if (gameState.moves.X && gameState.moves.O) {
+        clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
+        
+        const winnerKey = evaluateRPSRound(gameState.moves.X, gameState.moves.O);
+        let roundInfo = '';
+        if (winnerKey === 'draw') {
+            roundInfo = 'RUNDE UNENTSCHIEDEN!';
+        } else {
+            gameState.scores[winnerKey]++;
+            roundInfo = `${gameState.players[winnerKey].username} gewinnt die Runde!`;
+        }
+
+        const matchWinnerKey = gameState.scores.X === 2 ? 'X' : (gameState.scores.O === 2 ? 'O' : null);
+        let resX, resO;
+
+        if (matchWinnerKey) {
+            gameState.winner = gameState.players[matchWinnerKey];
+            const loserKey = matchWinnerKey === 'X' ? 'O' : 'X';
+            [resX, resO] = await Promise.all([db.updateStats(gameState.players[matchWinnerKey].id, 'win'), db.updateStats(gameState.players[loserKey].id, 'loss')]).catch(() => [null, null]);
+        }
+
+        const buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, roundInfo, EMOJIS);
+        const attachment = new AttachmentBuilder(buffer, { name: 'rps_v2.png' });
+        const embed = UI.createRPSStatusEmbed(gameState.players.X, gameState.players.O, gameState.scores, gameState.round, gameState.winner);
+
+        if (!matchWinnerKey) {
+            gameState.moves = { X: null, O: null };
+            gameState.round++;
+        }
+
+        await interaction.message.edit({
+            content: null, embeds: [embed], files: [attachment],
+            components: UI.createRPSComponents(gameState.id, !!matchWinnerKey)
+        }).catch(() => null);
+
+        if (matchWinnerKey) {
+            await finishGame(interaction, gameState, matchWinnerKey, resX, resO);
+        } else {
+            setupAfkTimers(gameState);
+        }
+    }
+}
+
+async function finishGame(interaction, gameState, winnerKey, resX, resO) {
+    if (!gameState.winner && !gameState.isDraw) {
+        setupAfkTimers(gameState);
+        return;
+    }
+    const duration = Math.round((Date.now() - gameState.startTime) / 1000);
+    const matchStats = { moves: gameState.moveCount || gameState.round, duration };
+    const replayRow = UI.createReplayButton(gameState.players.X.id, gameState.players.O.id);
+    
+    if (gameState.winner) {
+        const winData = winnerKey === 'X' ? resX : resO;
+        const winEmbed = UI.createVictoryAnnouncement(gameState.winner, winData?.data?.current_streak || 1, winData?.data?.points || 0, matchStats);
+        if (gameState.type === 'rps') {
+            await interaction.channel.send({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
+        } else {
+            await interaction.followUp({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
+        }
+    } else {
+        if (gameState.type === 'rps') {
+            await interaction.channel.send({ embeds: [UI.createDrawAnnouncement(gameState.players.X, gameState.players.O)], components: [replayRow] }).catch(() => null);
+        } else {
+            await interaction.followUp({ embeds: [UI.createDrawAnnouncement(gameState.players.X, gameState.players.O)], components: [replayRow] }).catch(() => null);
+        }
+    }
+    cleanupGame(gameState.id);
+}
+
+async function startNewGame(interaction, opponent, type = 'tictactoe') {
     const gameId = interaction.id;
     const playerX = interaction.user;
+    
     const gameState = {
-        id: gameId, players: { X: playerX, O: opponent },
-        board: Array(3).fill(null).map(() => Array(3).fill(null)),
+        id: gameId, type, players: { X: playerX, O: opponent },
         turn: 'X', winner: null, isDraw: false, startTime: Date.now(), moveCount: 0
     };
+
+    if (type === 'tictactoe') {
+        gameState.board = Array(3).fill(null).map(() => Array(3).fill(null));
+    } else if (type === 'connect4') {
+        gameState.board = Array(6).fill(null).map(() => Array(7).fill(null));
+    } else if (type === 'rps') {
+        gameState.moves = { X: null, O: null };
+        gameState.scores = { X: 0, O: 0 };
+        gameState.round = 1;
+        gameState.turn = null; 
+    }
+
     games.set(gameId, gameState); activeUsers.add(playerX.id); activeUsers.add(opponent.id);
     
     try {
+        let buffer, attachment, embed, components;
         const strongest = await db.getStrongestPlayer().catch(() => null);
-        const buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
-        const attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
-        const embed = UI.createGameStatusEmbed(playerX, opponent, playerX);
-        await interaction.editReply({ content: null, embeds: [embed], files: [attachment], components: UI.createGameComponents(gameState.board, false, gameId) }).catch(() => null);
+
+        if (type === 'tictactoe') {
+            buffer = await GameEngine.renderBoard(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
+            attachment = new AttachmentBuilder(buffer, { name: 'board_v2.png' });
+            embed = UI.createGameStatusEmbed(playerX, opponent, playerX, null, false, 'Tic Tac Toe', 'board_v2.png');
+            components = UI.createGameComponents(gameState.board, false, gameId);
+        } else if (type === 'connect4') {
+            buffer = await GameEngine.renderC4Board(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
+            attachment = new AttachmentBuilder(buffer, { name: 'c4_board.png' });
+            embed = UI.createGameStatusEmbed(playerX, opponent, playerX, null, false, 'Vier Gewinnt', 'c4_board.png');
+            components = UI.createC4Components(gameState.board, false, gameId);
+        } else if (type === 'rps') {
+            buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, 'Wähle deine Aktion!', EMOJIS);
+            attachment = new AttachmentBuilder(buffer, { name: 'rps_v2.png' });
+            embed = UI.createRPSStatusEmbed(playerX, opponent, gameState.scores, gameState.round);
+            components = UI.createRPSComponents(gameId, false);
+        }
+
+        await interaction.editReply({ content: null, embeds: [embed], files: [attachment], components }).catch(() => null);
         setupAfkTimers(gameState);
     } catch (e) {
         console.error('[Start Error]', e);
@@ -291,11 +464,19 @@ function setupAfkTimers(gs) {
     clearTimeout(gs.afkWarningTimer); clearTimeout(gs.afkForfeitTimer);
     gs.afkWarningTimer = setTimeout(async () => {
         const chan = client.channels.cache.get(GAME_CHANNEL_ID);
-        if (chan) chan.send({ content: `⚠️ <@${gs.players[gs.turn].id}>, move now or forfeit!` }).catch(() => null);
+        if (chan) {
+            const warningTarget = gs.type === 'rps' 
+                ? (!gs.moves.X ? gs.players.X.id : gs.players.O.id)
+                : gs.players[gs.turn].id;
+            chan.send({ content: `⚠️ <@${warningTarget}>, move now or forfeit!` }).catch(() => null);
+        }
     }, AFK_WARNING_MS);
     gs.afkForfeitTimer = setTimeout(async () => {
-        const next = gs.turn === 'X' ? 'O' : 'X';
-        const winner = gs.players[next]; const loser = gs.players[gs.turn];
+        const loserKey = gs.type === 'rps' 
+            ? (!gs.moves.X ? 'X' : 'O')
+            : gs.turn;
+        const winnerKey = loserKey === 'X' ? 'O' : 'X';
+        const winner = gs.players[winnerKey]; const loser = gs.players[loserKey];
         await db.updateStats(winner.id, 'win').catch(() => null); await db.updateStats(loser.id, 'loss').catch(() => null);
         const chan = client.channels.cache.get(GAME_CHANNEL_ID);
         if (chan) chan.send({ embeds: [UI.createAfkForfeit(loser, winner)], components: [UI.createReplayButton(gs.players.X.id, gs.players.O.id)] }).catch(() => null);
@@ -312,7 +493,7 @@ function cleanupGame(gameId) {
     }
 }
 
-function checkWinner(board) {
+function checkWinnerTTT(board) {
     for (let i = 0; i < 3; i++) {
         if (board[i][0] && board[i][0] === board[i][1] && board[i][0] === board[i][2]) return board[i][0];
         if (board[0][i] && board[0][i] === board[1][i] && board[0][i] === board[2][i]) return board[0][i];
@@ -322,6 +503,41 @@ function checkWinner(board) {
     return null;
 }
 
-function isBoardFull(board) { return board.every(row => row.every(cell => cell !== null)); }
+function isBoardFullTTT(board) { return board.every(row => row.every(cell => cell !== null)); }
+
+function checkWinnerC4(board) {
+    const rows = 6, cols = 7;
+    for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols - 3; c++) {
+            if (board[r][c] && board[r][c] === board[r][c+1] && board[r][c] === board[r][c+2] && board[r][c] === board[r][c+3]) return board[r][c];
+        }
+    }
+    for (let r = 0; r < rows - 3; r++) {
+        for (let c = 0; c < cols; c++) {
+            if (board[r][c] && board[r][c] === board[r+1][c] && board[r][c] === board[r+2][c] && board[r][c] === board[r+3][c]) return board[r][c];
+        }
+    }
+    for (let r = 0; r < rows - 3; r++) {
+        for (let c = 0; c < cols - 3; c++) {
+            if (board[r][c] && board[r][c] === board[r+1][c+1] && board[r][c] === board[r+2][c+2] && board[r][c] === board[r+3][c+3]) return board[r][c];
+        }
+    }
+    for (let r = 0; r < rows - 3; r++) {
+        for (let c = 3; c < cols; c++) {
+            if (board[r][c] && board[r][c] === board[r+1][c-1] && board[r][c] === board[r+2][c-2] && board[r][c] === board[r+3][c-3]) return board[r][c];
+        }
+    }
+    return null;
+}
+
+function isBoardFullC4(board) { return board[0].every(cell => cell !== null); }
+
+function evaluateRPSRound(m1, m2) {
+    if (m1 === m2) return 'draw';
+    if ((m1 === 'rock' && m2 === 'scissors') || 
+        (m1 === 'paper' && m2 === 'rock') || 
+        (m1 === 'scissors' && m2 === 'paper')) return 'X';
+    return 'O';
+}
 
 client.login(process.env.TOKEN);

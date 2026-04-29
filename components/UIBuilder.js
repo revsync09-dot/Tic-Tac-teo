@@ -48,18 +48,60 @@ class UIBuilder {
         return rows;
     }
 
-    createGameStatusEmbed(playerX, playerO, turn, winner = null, isDraw = false) {
+    createGameStatusEmbed(playerX, playerO, turn, winner = null, isDraw = false, gameName = 'Tic Tac Toe', imageName = 'board_v2.png') {
         const embed = new EmbedBuilder()
             .setColor(winner ? '#22c55e' : isDraw ? '#747f8d' : '#5865F2')
-            .setTitle(winner ? '👑 VICTORY REACHED' : isDraw ? '🤝 DRAW' : '⚔️ ARENA ACTIVE')
+            .setTitle(winner ? `👑 ${gameName} VICTORY` : isDraw ? `🤝 ${gameName} DRAW` : `⚔️ ${gameName} ACTIVE`)
             .addFields(
                 { name: `Player 1 (X)`, value: `<@${playerX.id}>`, inline: true },
                 { name: `Player 2 (O)`, value: `<@${playerO.id}>`, inline: true },
                 { name: `Current Turn`, value: winner || isDraw ? '🏁 Game Over' : `<@${turn.id}>`, inline: false }
             )
-            .setImage('attachment://board_v2.png')
+            .setImage(`attachment://${imageName}`)
             .setTimestamp();
         return embed;
+    }
+
+    createRPSStatusEmbed(playerX, playerO, scores, round, winner = null) {
+        const embed = new EmbedBuilder()
+            .setColor(winner ? '#22c55e' : '#5865F2')
+            .setTitle(winner ? `👑 RPS MATCH WINNER` : `⚔️ RPS: ROUND ${round}`)
+            .addFields(
+                { name: `Player 1`, value: `<@${playerX.id}>\nScore: **${scores.X}**`, inline: true },
+                { name: `Player 2`, value: `<@${playerO.id}>\nScore: **${scores.O}**`, inline: true },
+            )
+            .setImage(`attachment://rps_v2.png`)
+            .setFooter({ text: 'Best of 3 - First to 2 points wins!' })
+            .setTimestamp();
+        return embed;
+    }
+
+    createC4Components(board, disabled = false, gameId = '') {
+        const row1 = new ActionRowBuilder();
+        const row2 = new ActionRowBuilder();
+        for (let c = 0; c < 7; c++) {
+            const isFull = board[0][c] !== null;
+            const btn = new ButtonBuilder()
+                .setCustomId(`c4_${gameId}_${c}`)
+                .setLabel(`${c + 1}`)
+                .setStyle(ButtonStyle.Secondary)
+                .setDisabled(disabled || isFull);
+            if (c < 4) row1.addComponents(btn);
+            else row2.addComponents(btn);
+        }
+        return [row1, row2];
+    }
+
+    createRPSComponents(gameId, disabled = false) {
+        const getSafeEmoji = (pref, fallback) => {
+            if (!pref || pref.length < 10) return fallback;
+            return pref.replace(/[^\d]/g, '');
+        };
+        return [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`rps_${gameId}_rock`).setEmoji(getSafeEmoji(this.emojis.RPS_ROCK, '🪨')).setLabel('Stein').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`rps_${gameId}_paper`).setEmoji(getSafeEmoji(this.emojis.RPS_PAPER, '📄')).setLabel('Papier').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`rps_${gameId}_scissors`).setEmoji(getSafeEmoji(this.emojis.RPS_SCISSORS, '✂️')).setLabel('Schere').setStyle(ButtonStyle.Primary).setDisabled(disabled)
+        )];
     }
 
     createVictoryAnnouncement(winner, streak, points, matchStats) {
@@ -91,20 +133,20 @@ class UIBuilder {
             .setTimestamp();
     }
 
-    createChallengeEmbed(challenger, target) {
+    createChallengeEmbed(challenger, target, gameName = 'Tic Tac Toe') {
         const emojiWin = this.formatEmoji(this.emojis.WIN, '🏆');
         return new EmbedBuilder()
             .setColor('#5865F2')
             .setTitle(`${emojiWin} BATTLE REQUEST`)
-            .setDescription(`🔥 <@${challenger.id}> challenged <@${target.id}>!\n\nDo you accept? (Expires in 60s)`)
+            .setDescription(`🔥 <@${challenger.id}> challenged <@${target.id}> to **${gameName}**!\n\nDo you accept? (Expires in 60s)`)
             .setThumbnail(target.displayAvatarURL())
             .setFooter({ text: 'Hyperions Arena Duel' });
     }
 
-    createChallengeButtons(challengerId, targetId) {
+    createChallengeButtons(challengerId, targetId, gameType = 'tictactoe') {
         return new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-                .setCustomId(`accept_battle_${challengerId}_${targetId}`)
+                .setCustomId(`accept_${gameType}_${challengerId}_${targetId}`)
                 .setLabel('Accept Duel')
                 .setEmoji('⚔️')
                 .setStyle(ButtonStyle.Primary)

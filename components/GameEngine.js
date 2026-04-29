@@ -68,6 +68,130 @@ class GameEngine {
         return canvas.toBuffer();
     }
 
+    async renderC4Board(board, emojis, players = {}, strongestId = null) {
+        const rows = 6, cols = 7;
+        const cellSize = 80;
+        const padding = 20;
+        const width = cols * cellSize + padding * 2;
+        const height = rows * cellSize + padding * 2;
+        
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // Background
+        ctx.fillStyle = '#0f1015';
+        ctx.fillRect(0, 0, width, height);
+
+        // Board Base
+        ctx.fillStyle = '#1e3a8a';
+        this.drawRoundedRect(ctx, padding - 10, padding - 10, cols * cellSize + 20, rows * cellSize + 20, 20);
+        ctx.fill();
+
+        ctx.shadowColor = '#000000';
+        ctx.shadowBlur = 10;
+        
+        const crownImg = await this.getEmojiImage(emojis.CROWN);
+        const redImg = await this.getEmojiImage(emojis.C4_RED);
+        const yellowImg = await this.getEmojiImage(emojis.C4_YELLOW);
+        const emptyImg = await this.getEmojiImage(emojis.C4_EMPTY);
+        
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cell = board[r][c];
+                const x = padding + c * cellSize + cellSize / 2;
+                const y = padding + r * cellSize + cellSize / 2;
+                const radius = cellSize / 2 - 8;
+
+                if (!cell) {
+                    if (emptyImg) {
+                        ctx.drawImage(emptyImg, x - radius, y - radius, radius * 2, radius * 2);
+                    } else {
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius, 0, Math.PI * 2);
+                        ctx.fillStyle = '#0f1015';
+                        ctx.fill();
+                    }
+                } else {
+                    const img = cell === 'X' ? redImg : yellowImg;
+                    if (img) {
+                        ctx.drawImage(img, x - radius, y - radius, radius * 2, radius * 2);
+                    } else {
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius, 0, Math.PI * 2);
+                        ctx.fillStyle = cell === 'X' ? '#ef4444' : '#facc15';
+                        ctx.fill();
+                    }
+                    
+                    const playerObj = players[cell];
+                    if (playerObj && playerObj.id === strongestId && crownImg) {
+                        ctx.drawImage(crownImg, x - 12, y - 12, 24, 24);
+                    }
+                }
+            }
+        }
+        ctx.shadowBlur = 0;
+        return canvas.toBuffer();
+    }
+
+    async renderRPS(moves, players, roundInfo, emojis = {}) {
+        const width = 600, height = 300;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        
+        const bg = ctx.createLinearGradient(0, 0, width, height);
+        bg.addColorStop(0, '#0d0f16'); bg.addColorStop(1, '#1a1e2e');
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, width, height);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 40px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('VS', width / 2, height / 2 + 15);
+        
+        const rockImg = await this.getEmojiImage(emojis.RPS_ROCK);
+        const paperImg = await this.getEmojiImage(emojis.RPS_PAPER);
+        const scissorsImg = await this.getEmojiImage(emojis.RPS_SCISSORS);
+        const hiddenImg = await this.getEmojiImage(emojis.RPS_HIDDEN);
+        const readyImg = await this.getEmojiImage(emojis.RPS_READY);
+
+        const drawMove = (moveStr, x, y, color) => {
+            const textMap = { 'rock': '🪨 STEIN', 'paper': '📄 PAPIER', 'scissors': '✂️ SCHERE', 'hidden': '❓ WARTET', 'ready': '✅ BEREIT' };
+            const imgMap = { 'rock': rockImg, 'paper': paperImg, 'scissors': scissorsImg, 'hidden': hiddenImg, 'ready': readyImg };
+            
+            const img = imgMap[moveStr];
+            if (img) {
+                ctx.drawImage(img, x - 25, y - 40, 50, 50);
+                ctx.fillStyle = color;
+                ctx.font = 'bold 20px sans-serif';
+                ctx.fillText(textMap[moveStr].split(' ')[1], x, y + 30);
+            } else {
+                ctx.fillStyle = color;
+                ctx.font = 'bold 36px sans-serif';
+                ctx.fillText(textMap[moveStr] || '...', x, y);
+            }
+        };
+
+        const stateX = moves.X ? (moves.O ? moves.X : 'ready') : 'hidden';
+        const stateO = moves.O ? (moves.X ? moves.O : 'ready') : 'hidden';
+
+        drawMove(stateX, width * 0.25, height / 2 + 10, '#ef4444');
+        drawMove(stateO, width * 0.75, height / 2 + 10, '#3b82f6');
+        
+        ctx.font = 'bold 24px sans-serif';
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText(players.X.username, width * 0.25, height - 30);
+        ctx.fillStyle = '#3b82f6';
+        ctx.fillText(players.O.username, width * 0.75, height - 30);
+
+        if (roundInfo) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 20px sans-serif';
+            ctx.fillText(roundInfo, width / 2, 40);
+        }
+
+        ctx.textAlign = 'left';
+        return canvas.toBuffer();
+    }
+
     async renderProfileCard(user, stats, rankTitle, globalRank) {
         const W = 700, H = 280;
         const canvas = createCanvas(W, H);
