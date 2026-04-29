@@ -159,11 +159,17 @@ class UIBuilder {
     }
 
     createChallengeButtons(challengerId, targetId, gameType = 'tictactoe') {
+        const getSafeEmoji = (pref, fallback) => {
+            if (!pref || pref.length < 10) return fallback;
+            return pref.replace(/[^\d]/g, '');
+        };
+        const buttonEmoji = getSafeEmoji(this.emojis.UI_TITLE, '⚔️');
+        
         return new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId(`accept_${gameType}_${challengerId}_${targetId}`)
                 .setLabel('Accept Duel')
-                .setEmoji('⚔️')
+                .setEmoji(buttonEmoji)
                 .setStyle(ButtonStyle.Primary)
         );
     }
