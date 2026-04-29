@@ -271,6 +271,67 @@ class GameEngine {
         ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r);
         ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
     }
+
+    async renderBS(gameState, emojis) {
+        const width = 500, height = 300;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        
+        ctx.fillStyle = '#2b2d31';
+        ctx.fillRect(0, 0, width, height);
+        
+        const cellSize = 40;
+        const gridSpacing = 60;
+        const startX1 = 20;
+        const startX2 = 20 + 5 * cellSize + gridSpacing;
+        const startY = 60;
+
+        // Draw Player Headers
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Player 1 Radar`, startX1 + (5 * cellSize) / 2, 35);
+        ctx.fillText(`Player 2 Radar`, startX2 + (5 * cellSize) / 2, 35);
+
+        const waterImg = await this.getEmojiImage(emojis.BS_WATER) || null;
+        const hitImg = await this.getEmojiImage(emojis.BS_HIT) || null;
+        const missImg = await this.getEmojiImage(emojis.BS_MISS) || null;
+
+        const drawGrid = (startX, attacks, enemyShips) => {
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    const x = startX + c * cellSize;
+                    const y = startY + r * cellSize;
+                    const cellId = `${r}_${c}`;
+                    
+                    ctx.fillStyle = '#1e1f22';
+                    ctx.fillRect(x, y, cellSize - 2, cellSize - 2);
+                    
+                    if (waterImg) ctx.drawImage(waterImg, x + 2, y + 2, cellSize - 6, cellSize - 6);
+                    
+                    if (attacks.includes(cellId)) {
+                        const isHit = enemyShips.includes(cellId);
+                        const img = isHit ? hitImg : missImg;
+                        if (img) ctx.drawImage(img, x + 2, y + 2, cellSize - 6, cellSize - 6);
+                        else {
+                            ctx.font = '20px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(isHit ? '💥' : '🌊', x + cellSize/2, y + cellSize/2);
+                        }
+                    }
+                }
+            }
+        };
+
+        // P1's Radar (Attacks made by X, enemy is O)
+        drawGrid(startX1, gameState.attacks.X, gameState.ships.O);
+        
+        // P2's Radar (Attacks made by O, enemy is X)
+        drawGrid(startX2, gameState.attacks.O, gameState.ships.X);
+
+        return canvas.toBuffer('image/png');
+    }
 }
 
 module.exports = new GameEngine();

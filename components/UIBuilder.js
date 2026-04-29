@@ -120,6 +120,87 @@ class UIBuilder {
         )];
     }
 
+    createBSSetupEmbed(playerX, playerO, gs) {
+        const titleEmoji = this.formatEmoji(this.emojis.BS_SHIP, '🚢');
+        const infoEmoji = this.formatEmoji(this.emojis.UI_INFO, '❗');
+        
+        const p1Ready = gs.ships.X.length === 5 ? '✅ Ready' : '⏳ Placing...';
+        const p2Ready = gs.ships.O.length === 5 ? '✅ Ready' : '⏳ Placing...';
+
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\` BATTLESHIP \`**\n\n` +
+                `┃ 👥 **\` Deployment Phase \`**\n` +
+                `┃ ❌ **<@${playerX.id}>**  \` ${p1Ready} \`\n` +
+                `┃ ⭕ **<@${playerO.id}>**  \` ${p2Ready} \`\n\n` +
+                `\`\`\`diff\n` +
+                `+ Both players must click their Setup button to place 5 submarines.\n` +
+                `\`\`\`\n`
+            )
+            .setTimestamp();
+    }
+
+    createBSSetupActionButtons(gameId, disabled = false) {
+        return [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`bs_setup_X_${gameId}`).setLabel('Player 1 Setup').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`bs_setup_O_${gameId}`).setLabel('Player 2 Setup').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+        )];
+    }
+
+    createBSGrid(gameId, pKey, selected, mode) {
+        const rows = [];
+        const letters = ['A', 'B', 'C', 'D', 'E'];
+        
+        for (let r = 0; r < 5; r++) {
+            const row = new ActionRowBuilder();
+            for (let c = 0; c < 5; c++) {
+                const cellId = `${r}_${c}`;
+                const isSelected = selected.includes(cellId);
+                
+                let btn = new ButtonBuilder()
+                    .setCustomId(`bs_${mode}_${pKey}_${gameId}_${r}_${c}`)
+                    .setLabel(`${letters[r]}${c+1}`);
+                    
+                if (mode === 'place') {
+                    btn.setStyle(isSelected ? ButtonStyle.Success : ButtonStyle.Secondary)
+                       .setDisabled(isSelected || (selected.length >= 5));
+                } else if (mode === 'attack') {
+                    btn.setStyle(isSelected ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                       .setDisabled(isSelected);
+                }
+                
+                row.addComponents(btn);
+            }
+            rows.push(row);
+        }
+        return rows;
+    }
+
+    createBSStatusEmbed(gs) {
+        const titleEmoji = gs.winner ? this.formatEmoji(this.emojis.WIN, '👑') : this.formatEmoji(this.emojis.BS_SHIP, '🚢');
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
+        
+        const titleText = gs.winner ? ` BATTLESHIP VICTORY ` : ` BATTLESHIP ACTIVE `;
+        const p1Hits = gs.attacks.X.filter(a => gs.ships.O.includes(a)).length;
+        const p2Hits = gs.attacks.O.filter(a => gs.ships.X.includes(a)).length;
+        
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\`${titleText}\`**\n\n` +
+                `┃ 👥 **\` Target Radars \`**\n` +
+                `┃ ❌ **<@${gs.players.X.id}>**  \` Submarines Destroyed: ${p1Hits}/5 \`\n` +
+                `┃ ⭕ **<@${gs.players.O.id}>**  \` Submarines Destroyed: ${p2Hits}/5 \`\n\n` +
+                `┃ ${gearEmoji} **\` Status \`**\n` +
+                `\`\`\`diff\n` +
+                (gs.winner ? `+ Winner: @${gs.winner.username}\n` : `+ Turn: @${gs.players[gs.turn].username}\n`) +
+                `\`\`\`\n`
+            )
+            .setImage(`attachment://bs_v2.png`)
+            .setTimestamp();
+    }
+
     createVictoryAnnouncement(winner, streak, points, matchStats) {
         const titleEmoji = this.formatEmoji(this.emojis.WIN, '🏆');
         const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');

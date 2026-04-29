@@ -72,6 +72,12 @@ const EMOJIS = {
     // Events
     EVENT_EXPIRED:   process.env.EMOJI_EVENT_EXPIRED   || '🏟️',
 
+    // Battleship
+    BS_SHIP:  process.env.EMOJI_BS_SHIP  || '🚢',
+    BS_HIT:   process.env.EMOJI_BS_HIT   || '💥',
+    BS_MISS:  process.env.EMOJI_BS_MISS  || '🌊',
+    BS_WATER: process.env.EMOJI_BS_WATER || '🟦',
+
     // Rewards & Leaderboard
     MEDAL_1:    process.env.EMOJI_MEDAL_1    || '🥇',
     MEDAL_2:    process.env.EMOJI_MEDAL_2    || '🥈',
@@ -107,7 +113,7 @@ client.on('interactionCreate', async interaction => {
 
             const { commandName } = interaction;
 
-            if (['tictactoe', 'connect4', 'rps'].includes(commandName)) {
+            if (['tictactoe', 'connect4', 'rps', 'battleship'].includes(commandName)) {
                 const now = Date.now();
                 const cd = cooldowns.get(interaction.user.id) || 0;
                 if (now < cd) return interaction.reply({ content: `${EMOJIS.SYS_COOLDOWN} Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s**.`, ephemeral: true }).catch(() => null);
@@ -119,7 +125,7 @@ client.on('interactionCreate', async interaction => {
 
                 cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
                 
-                const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Vier Gewinnt', rps: 'Schere-Stein-Papier' };
+                const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Vier Gewinnt', rps: 'Schere-Stein-Papier', battleship: 'Schiffe Versenken' };
                 const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent, gameNames[commandName]);
                 const row = UI.createChallengeButtons(interaction.user.id, opponent.id, commandName);
                 await interaction.reply({ content: `${EMOJIS.UI_TITLE} <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
@@ -251,6 +257,63 @@ client.on('interactionCreate', async interaction => {
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
                     rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : 'tictactoe') });
                     return interaction.reply({ content: `${EMOJIS.UI_GAME} <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
+                }
+            }
+            // BATTLESHIP
+            if (interaction.customId.startsWith('bs_setup_') || interaction.customId.startsWith('bs_place_') || interaction.customId.startsWith('bs_attack_')) {
+                const parts = interaction.customId.split('_');
+                const action = parts[1]; // setup, place, attack
+                const pKey = parts[2]; // X, O
+                const gameId = parts[3];
+                const gs = games.get(gameId);
+                
+                if (!gs) return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Game expired.`, ephemeral: true }).catch(() => null);
+                if (interaction.user.id !== gs.players[pKey].id) return interaction.reply({ content: `${EMOJIS.SYS_DENIED} Not your board!`, ephemeral: true }).catch(() => null);
+
+                if (action === 'setup') {
+                    return interaction.reply({ 
+                        content: `**Deployment Phase**\nHide your 5 Submarines by clicking on the grid below.`, 
+                        components: UI.createBSGrid(gameId, pKey, gs.ships[pKey], 'place'),
+                        ephemeral: true 
+                    }).catch(() => null);
+                }
+                
+                if (action === 'place') {
+                    if (gs.status !== 'setup') return interaction.reply({ content: `${EMOJIS.SYS_WARNING} Game already started!`, ephemeral: true }).catch(() => null);
+                    if (gs.ships[pKey].length >= 5) return interaction.reply({ content: `${EMOJIS.SYS_SUCCESS} Fleet already deployed!`, ephemeral: true }).catch(() => null);
+                    
+                    const r = parts[4], c = parts[5];
+                    const cell = `${r}_${c}`;
+                    if (!gs.ships[pKey].includes(cell)) gs.ships[pKey].push(cell);
+                    
+                    if (gs.ships[pKey].length === 5) {
+                        await interaction.update({ content: `✅ Fleet deployed! Wait for opponent...`, components: UI.createBSGrid(gameId, pKey, gs.ships[pKey], 'place') }).catch(() => null);
+                        if (gs.ships.X.length === 5 && gs.ships.O.length === 5) {
+                            gs.status = 'playing';
+                            gs.startTime = Date.now();
+                            try {
+                                const chan = await client.channels.fetch(gs.channelId);
+                                const msg = await chan.messages.fetch(gs.mainMessageId);
+                                const buffer = await GameEngine.renderBS(gs, EMOJIS);
+                                const attachment = new AttachmentBuilder(buffer, { name: 'bs_v2.png' });
+                                const embed = UI.createBSStatusEmbed(gs);
+                                const components = UI.createBSGrid(gameId, gs.turn, gs.attacks[gs.turn], 'attack');
+                                await msg.edit({ embeds: [embed], files: [attachment], components }).catch(() => null);
+                                setupAfkTimers(gs);
+                            } catch (e) { console.error('BS Start Error', e); }
+                        }
+                    } else {
+                        await interaction.update({ 
+                            content: `**Deployment Phase** (${gs.ships[pKey].length}/5 deployed)\nHide your 5 Submarines by clicking on the grid below.`, 
+                            components: UI.createBSGrid(gameId, pKey, gs.ships[pKey], 'place')
+                        }).catch(() => null);
+                    }
+                    return;
+                }
+                
+                if (action === 'attack') {
+                    await handleBSAttack(interaction, gs, pKey, parts[4], parts[5]);
+                    return;
                 }
             }
 
@@ -436,6 +499,57 @@ async function handleRPSMove(interaction, gameState, move) {
     }
 }
 
+async function handleBSAttack(interaction, gs, pKey, rStr, cStr) {
+    if (gs.status !== 'playing') return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Game over or not started.`, ephemeral: true }).catch(() => null);
+    if (gs.turn !== pKey) return interaction.reply({ content: `${EMOJIS.SYS_DENIED} Not your turn!`, ephemeral: true }).catch(() => null);
+
+    // Atomic Lock
+    if (lockSet.has(gs.id)) return interaction.reply({ content: `${EMOJIS.SYS_WARNING} Processing...`, ephemeral: true }).catch(() => null);
+    lockSet.add(gs.id);
+
+    try {
+        const cell = `${rStr}_${cStr}`;
+        if (gs.attacks[pKey].includes(cell)) {
+            return interaction.reply({ content: `${EMOJIS.SYS_WARNING} You already attacked here!`, ephemeral: true }).catch(() => null);
+        }
+
+        await interaction.deferUpdate().catch(() => null);
+        
+        clearTimeout(gs.afkWarningTimer); clearTimeout(gs.afkForfeitTimer);
+        gs.attacks[pKey].push(cell);
+        gs.moveCount++;
+        
+        const opponentKey = pKey === 'X' ? 'O' : 'X';
+        const isHit = gs.ships[opponentKey].includes(cell);
+        
+        let hitCount = 0;
+        for (const atk of gs.attacks[pKey]) {
+            if (gs.ships[opponentKey].includes(atk)) hitCount++;
+        }
+        
+        if (hitCount === 5) gs.winner = gs.players[pKey];
+        else gs.turn = opponentKey;
+
+        const buffer = await GameEngine.renderBS(gs, EMOJIS);
+        const attachment = new AttachmentBuilder(buffer, { name: 'bs_v2.png' });
+        const embed = UI.createBSStatusEmbed(gs);
+        
+        const components = gs.winner ? [] : UI.createBSGrid(gs.id, gs.turn, gs.attacks[gs.turn], 'attack');
+        
+        await interaction.message.edit({ content: null, embeds: [embed], files: [attachment], components }).catch(() => null);
+
+        if (gs.winner) {
+            const loserKey = opponentKey;
+            const [resX, resO] = await Promise.all([db.updateStats(gs.players[pKey].id, 'win'), db.updateStats(gs.players[loserKey].id, 'loss')]).catch(() => [null, null]);
+            await finishGame(interaction, gs, pKey, resX, resO);
+        } else {
+            setupAfkTimers(gs);
+        }
+    } finally {
+        lockSet.delete(gs.id);
+    }
+}
+
 async function finishGame(interaction, gameState, winnerKey, resX, resO) {
     if (!gameState.winner && !gameState.isDraw) {
         setupAfkTimers(gameState);
@@ -469,7 +583,9 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
     
     const gameState = {
         id: gameId, type, players: { X: playerX, O: opponent },
-        turn: 'X', winner: null, isDraw: false, startTime: Date.now(), moveCount: 0
+        turn: 'X', winner: null, isDraw: false, startTime: Date.now(), moveCount: 0,
+        channelId: interaction.channelId,
+        mainMessageId: interaction.message.id
     };
 
     if (type === 'tictactoe') {
@@ -481,6 +597,10 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
         gameState.scores = { X: 0, O: 0 };
         gameState.round = 1;
         gameState.turn = null; 
+    } else if (type === 'battleship') {
+        gameState.status = 'setup';
+        gameState.ships = { X: [], O: [] };
+        gameState.attacks = { X: [], O: [] };
     }
 
     games.set(gameId, gameState); activeUsers.add(playerX.id); activeUsers.add(opponent.id);
@@ -500,13 +620,20 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
             embed = UI.createGameStatusEmbed(playerX, opponent, playerX, null, false, 'Vier Gewinnt', 'c4_board.png');
             components = UI.createC4Components(gameState.board, false, gameId);
         } else if (type === 'rps') {
-            buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, 'Wähle deine Aktion!', EMOJIS);
+            buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, 'Choose your action!', EMOJIS);
             attachment = new AttachmentBuilder(buffer, { name: 'rps_v2.png' });
             embed = UI.createRPSStatusEmbed(playerX, opponent, gameState.scores, gameState.round);
             components = UI.createRPSComponents(gameId, false);
+        } else if (type === 'battleship') {
+            embed = UI.createBSSetupEmbed(playerX, opponent, gameState);
+            components = UI.createBSSetupActionButtons(gameId);
+            attachment = null;
         }
 
-        await interaction.editReply({ content: null, embeds: [embed], files: [attachment], components }).catch(() => null);
+        const msgPayload = { content: null, embeds: [embed], components };
+        if (attachment) msgPayload.files = [attachment];
+        
+        await interaction.editReply(msgPayload).catch(() => null);
         setupAfkTimers(gameState);
     } catch (e) {
         console.error('[Start Error]', e);

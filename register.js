@@ -18,6 +18,11 @@ const commands = [
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
         
     new SlashCommandBuilder()
+        .setName('battleship')
+        .setDescription('Challenge someone to Schiffe Versenken (Battleship)!')
+        .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
+        
+    new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('🏆 View the global Hall of Legends'),
 
