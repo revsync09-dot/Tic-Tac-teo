@@ -59,8 +59,8 @@ class UIBuilder {
             .setDescription(
                 `${titleEmoji} **\`${titleText}\`**\n\n` +
                 `┃ 👥 **\` Players \`**\n` +
-                `┃ ❌ **\` <@${playerX.id}> \`**\n` +
-                `┃ ⭕ **\` <@${playerO.id}> \`**\n\n` +
+                `┃ ❌ **<@${playerX.id}>**\n` +
+                `┃ ⭕ **<@${playerO.id}>**\n\n` +
                 `┃ ${gearEmoji} **\` Status \`**\n` +
                 `\`\`\`diff\n` +
                 (winner || isDraw ? `+ Game Over\n` : `+ Turn: @${turn.username}\n`) +
@@ -81,8 +81,8 @@ class UIBuilder {
             .setDescription(
                 `${titleEmoji} **\`${titleText}\`**\n\n` +
                 `┃ 👥 **\` Scores \`**\n` +
-                `┃ ❌ **\` <@${playerX.id}> \`**  \` ${scores.X} Pts \`\n` +
-                `┃ ⭕ **\` <@${playerO.id}> \`**  \` ${scores.O} Pts \`\n\n` +
+                `┃ ❌ **<@${playerX.id}>**  \` ${scores.X} Pts \`\n` +
+                `┃ ⭕ **<@${playerO.id}>**  \` ${scores.O} Pts \`\n\n` +
                 `┃ ${gearEmoji} **\` Format \`**\n` +
                 `\`\`\`diff\n` +
                 `+ Best of 3 (First to 2 points wins)\n` +
@@ -130,7 +130,7 @@ class UIBuilder {
             .setDescription(
                 `${titleEmoji} **\` MATCH CONCLUDED \`**\n\n` +
                 `┃ 👑 **\` Winner \`**\n` +
-                `┃ ❗ **\` <@${winner.id}> \`**\n\n` +
+                `┃ ❗ **<@${winner.id}>**\n\n` +
                 `┃ ${gearEmoji} **\` Stats \`**\n` +
                 `\`\`\`diff\n` +
                 `+ Rank:   ${rank.title}\n` +
@@ -150,7 +150,7 @@ class UIBuilder {
             .setColor('#2b2d31')
             .setDescription(
                 `${drawEmoji} **\` MATCH STALEMATE \`**\n\n` +
-                `┃ ❗ **\` <@${p1.id}> & <@${p2.id}> \`**\n\n` +
+                `┃ ❗ **<@${p1.id}> & <@${p2.id}>**\n\n` +
                 `\`\`\`diff\n` +
                 `+ Both players earn +1 Point!\n` +
                 `\`\`\`\n`
@@ -215,9 +215,9 @@ class UIBuilder {
             .setColor('#2b2d31')
             .setDescription(
                 `${stopEmoji} **\` AFK FORFEIT \`**\n\n` +
-                `┃ ❌ **\` <@${loser.id}> timed out! \`**\n\n` +
+                `┃ ❌ **<@${loser.id}> timed out!**\n\n` +
                 `\`\`\`diff\n` +
-                `+ Winner: <@${winner.id}> (by forfeit)\n` +
+                `+ Winner: @${winner.username} (by forfeit)\n` +
                 `\`\`\`\n`
             )
             .setTimestamp();
@@ -229,7 +229,7 @@ class UIBuilder {
             .setColor('#2b2d31')
             .setDescription(
                 `${starEmoji} **\` RANK UP \`**\n\n` +
-                `┃ 🎉 **\` <@${user.id}> \`**\n\n` +
+                `┃ 🎉 **<@${user.id}>**\n\n` +
                 `\`\`\`diff\n` +
                 `+ Promoted from ${oldR} to ${newR}!\n` +
                 `\`\`\`\n`
@@ -243,7 +243,7 @@ class UIBuilder {
             .setColor('#2b2d31')
             .setDescription(
                 `${fireEmoji} **\` UNSTOPPABLE \`**\n\n` +
-                `┃ 🚀 **\` <@${user.id}> \`**\n\n` +
+                `┃ 🚀 **<@${user.id}>**\n\n` +
                 `\`\`\`diff\n` +
                 `+ Currently on a ${streak} game win streak!\n` +
                 `\`\`\`\n`
@@ -255,7 +255,7 @@ class UIBuilder {
         const emoji = isError ? this.formatEmoji(this.emojis.SYS_ERROR, '❌') : this.formatEmoji(this.emojis.SYS_WARNING, '⚠️');
         return new EmbedBuilder()
             .setColor('#2b2d31')
-            .setDescription(`${emoji} **\` ${title} \`**\n\n┃ ❗ **\` ${message} \`**`);
+            .setDescription(`${emoji} **\` ${title} \`**\n\n┃ ❗ **${message}**`);
     }
 }
 
