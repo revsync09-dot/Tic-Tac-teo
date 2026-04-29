@@ -49,31 +49,47 @@ class UIBuilder {
     }
 
     createGameStatusEmbed(playerX, playerO, turn, winner = null, isDraw = false, gameName = 'Tic Tac Toe', imageName = 'board_v2.png') {
-        const embed = new EmbedBuilder()
-            .setColor(winner ? '#22c55e' : isDraw ? '#747f8d' : '#5865F2')
-            .setTitle(winner ? `👑 ${gameName} VICTORY` : isDraw ? `🤝 ${gameName} DRAW` : `⚔️ ${gameName} ACTIVE`)
-            .addFields(
-                { name: `Player 1 (X)`, value: `<@${playerX.id}>`, inline: true },
-                { name: `Player 2 (O)`, value: `<@${playerO.id}>`, inline: true },
-                { name: `Current Turn`, value: winner || isDraw ? '🏁 Game Over' : `<@${turn.id}>`, inline: false }
+        const titleEmoji = winner ? this.formatEmoji(this.emojis.WIN, '👑') : (isDraw ? this.formatEmoji(this.emojis.DRAW, '🤝') : this.formatEmoji(this.emojis.UI_TITLE, '⚔️'));
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
+        
+        const titleText = winner ? ` ${gameName} VICTORY ` : (isDraw ? ` ${gameName} DRAW ` : ` ${gameName} ACTIVE `);
+        
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\`${titleText}\`**\n\n` +
+                `┃ 👥 **\` Players \`**\n` +
+                `┃ ❌ **\` <@${playerX.id}> \`**\n` +
+                `┃ ⭕ **\` <@${playerO.id}> \`**\n\n` +
+                `┃ ${gearEmoji} **\` Status \`**\n` +
+                `\`\`\`diff\n` +
+                (winner || isDraw ? `+ Game Over\n` : `+ Turn: @${turn.username}\n`) +
+                `\`\`\`\n`
             )
             .setImage(`attachment://${imageName}`)
             .setTimestamp();
-        return embed;
     }
 
     createRPSStatusEmbed(playerX, playerO, scores, round, winner = null) {
-        const embed = new EmbedBuilder()
-            .setColor(winner ? '#22c55e' : '#5865F2')
-            .setTitle(winner ? `👑 RPS MATCH WINNER` : `⚔️ RPS: ROUND ${round}`)
-            .addFields(
-                { name: `Player 1`, value: `<@${playerX.id}>\nScore: **${scores.X}**`, inline: true },
-                { name: `Player 2`, value: `<@${playerO.id}>\nScore: **${scores.O}**`, inline: true },
+        const titleEmoji = winner ? this.formatEmoji(this.emojis.WIN, '👑') : this.formatEmoji(this.emojis.UI_TITLE, '⚔️');
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
+        
+        const titleText = winner ? ` RPS MATCH WINNER ` : ` RPS: ROUND ${round} `;
+
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\`${titleText}\`**\n\n` +
+                `┃ 👥 **\` Scores \`**\n` +
+                `┃ ❌ **\` <@${playerX.id}> \`**  \` ${scores.X} Pts \`\n` +
+                `┃ ⭕ **\` <@${playerO.id}> \`**  \` ${scores.O} Pts \`\n\n` +
+                `┃ ${gearEmoji} **\` Format \`**\n` +
+                `\`\`\`diff\n` +
+                `+ Best of 3 (First to 2 points wins)\n` +
+                `\`\`\`\n`
             )
             .setImage(`attachment://rps_v2.png`)
-            .setFooter({ text: 'Best of 3 - First to 2 points wins!' })
             .setTimestamp();
-        return embed;
     }
 
     createC4Components(board, disabled = false, gameId = '') {
@@ -105,31 +121,40 @@ class UIBuilder {
     }
 
     createVictoryAnnouncement(winner, streak, points, matchStats) {
-        const emojiRank = this.formatEmoji(this.emojis.RANK, '🏅');
-        const emojiStreak = this.formatEmoji(this.emojis.STREAK, '🔥');
-        const emojiPoints = this.formatEmoji(this.emojis.POINTS, '💰');
+        const titleEmoji = this.formatEmoji(this.emojis.WIN, '🏆');
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
         const rank = this.getRank(points);
 
         return new EmbedBuilder()
-            .setColor(rank.color)
-            .setTitle('🏆 MATCH CONCLUDED')
+            .setColor('#2b2d31')
             .setDescription(
-                `👑 **Winner:** <@${winner.id}>\n` +
-                `${emojiRank} **Rank:** \`${rank.title}\`\n` +
-                `${emojiStreak} **Current Streak:** ${streak}\n` +
-                `${emojiPoints} **Points Earned:** +3\n\n` +
-                `${this.formatEmoji(this.emojis.STATS, '📊')} **Match:** ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n\n` +
-                `Use \`/profile\` to see your full stats!`
+                `${titleEmoji} **\` MATCH CONCLUDED \`**\n\n` +
+                `┃ 👑 **\` Winner \`**\n` +
+                `┃ ❗ **\` <@${winner.id}> \`**\n\n` +
+                `┃ ${gearEmoji} **\` Stats \`**\n` +
+                `\`\`\`diff\n` +
+                `+ Rank:   ${rank.title}\n` +
+                `+ Streak: ${streak}\n` +
+                `+ Points: +3 (Total: ${points})\n` +
+                `+ Match:  ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n` +
+                `\`\`\`\n` +
+                `**\` PROFILE \`**\n` +
+                `┃ 🔗 **\` Use /profile for more details \`**`
             )
-            .setFooter({ text: 'Tournament Level Match' })
             .setTimestamp();
     }
 
     createDrawAnnouncement(p1, p2) {
+        const drawEmoji = this.formatEmoji(this.emojis.DRAW, '🤝');
         return new EmbedBuilder()
-            .setColor('#747f8d')
-            .setTitle('🤝 STALEMATE')
-            .setDescription(`🤝 <@${p1.id}> & <@${p2.id}>\n\nBoth players earn **+1 Point**!`)
+            .setColor('#2b2d31')
+            .setDescription(
+                `${drawEmoji} **\` MATCH STALEMATE \`**\n\n` +
+                `┃ ❗ **\` <@${p1.id}> & <@${p2.id}> \`**\n\n` +
+                `\`\`\`diff\n` +
+                `+ Both players earn +1 Point!\n` +
+                `\`\`\`\n`
+            )
             .setTimestamp();
     }
 
@@ -185,27 +210,52 @@ class UIBuilder {
     }
 
     createAfkForfeit(loser, winner) {
+        const stopEmoji = this.formatEmoji(this.emojis.AFK_STOP, '🛑');
         return new EmbedBuilder()
-            .setColor('#ef4444')
-            .setTitle('🛑 AFK FORFEIT')
-            .setDescription(`❌ <@${loser.id}> was too slow!\n👑 <@${winner.id}> wins by forfeit!`)
+            .setColor('#2b2d31')
+            .setDescription(
+                `${stopEmoji} **\` AFK FORFEIT \`**\n\n` +
+                `┃ ❌ **\` <@${loser.id}> timed out! \`**\n\n` +
+                `\`\`\`diff\n` +
+                `+ Winner: <@${winner.id}> (by forfeit)\n` +
+                `\`\`\`\n`
+            )
             .setTimestamp();
     }
 
     createRankUpAnnouncement(user, oldR, newR) {
+        const starEmoji = this.formatEmoji(this.emojis.RANK_UP, '⭐');
         return new EmbedBuilder()
-            .setColor('#ffd700')
-            .setTitle('⭐ RANK UP')
-            .setDescription(`🎉 <@${user.id}> promoted from \`${oldR}\` to \`${newR}\`!`)
+            .setColor('#2b2d31')
+            .setDescription(
+                `${starEmoji} **\` RANK UP \`**\n\n` +
+                `┃ 🎉 **\` <@${user.id}> \`**\n\n` +
+                `\`\`\`diff\n` +
+                `+ Promoted from ${oldR} to ${newR}!\n` +
+                `\`\`\`\n`
+            )
             .setTimestamp();
     }
 
     createStreakMilestoneAnnouncement(user, streak) {
+        const fireEmoji = this.formatEmoji(this.emojis.STREAK, '🔥');
         return new EmbedBuilder()
-            .setColor('#ff4757')
-            .setTitle('🔥 UNSTOPPABLE')
-            .setDescription(`🚀 <@${user.id}> is on a **${streak}** game win streak!`)
+            .setColor('#2b2d31')
+            .setDescription(
+                `${fireEmoji} **\` UNSTOPPABLE \`**\n\n` +
+                `┃ 🚀 **\` <@${user.id}> \`**\n\n` +
+                `\`\`\`diff\n` +
+                `+ Currently on a ${streak} game win streak!\n` +
+                `\`\`\`\n`
+            )
             .setTimestamp();
+    }
+    
+    createSystemEmbed(title, message, isError = false) {
+        const emoji = isError ? this.formatEmoji(this.emojis.SYS_ERROR, '❌') : this.formatEmoji(this.emojis.SYS_WARNING, '⚠️');
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(`${emoji} **\` ${title} \`**\n\n┃ ❗ **\` ${message} \`**`);
     }
 }
 

@@ -27,34 +27,60 @@ const COOLDOWN_MS      = 20_000;
 const GAME_TTL_MS      = 300_000;
 
 const EMOJIS = {
+    // Core Game
     X:       process.env.EMOJI_X       || '❌',
     O:       process.env.EMOJI_O       || '⭕',
+    EMPTY:   process.env.EMOJI_EMPTY   || '➖',
+
+    // Ranks & Stats
     WIN:     process.env.EMOJI_WIN     || '🏆',
     RANK:    process.env.EMOJI_RANK    || '🏅',
     POINTS:  process.env.EMOJI_POINTS  || '💰',
     STREAK:  process.env.EMOJI_STREAK  || '🔥',
+    STATS:   process.env.EMOJI_STATS   || '1480578098952142999',
+    CROWN:   process.env.EMOJI_CROWN   || process.env.EMOJI_WIN || '1482120473251807302',
+
+    // Game Actions
     REMATCH: process.env.EMOJI_REMATCH || '🎮',
     DRAW:    process.env.EMOJI_DRAW    || '🤝',
-    CROWN:   process.env.EMOJI_CROWN   || process.env.EMOJI_WIN || '1482120473251807302',
-    SUCCESS: process.env.EMOJI_SUCCESS || '1480578220003819726', 
-    ERROR:   process.env.EMOJI_ERROR   || '❌',
-    EMPTY:   process.env.EMOJI_EMPTY   || '➖',
-    STATS:   process.env.EMOJI_STATS   || '1480578098952142999',
     
+    // Connect 4
     C4_RED:    process.env.EMOJI_C4_RED    || '🔴',
     C4_YELLOW: process.env.EMOJI_C4_YELLOW || '🟡',
     C4_EMPTY:  process.env.EMOJI_C4_EMPTY  || '⚫',
 
+    // RPS
     RPS_ROCK:     process.env.EMOJI_RPS_ROCK     || '🪨',
     RPS_PAPER:    process.env.EMOJI_RPS_PAPER    || '📄',
     RPS_SCISSORS: process.env.EMOJI_RPS_SCISSORS || '✂️',
     RPS_HIDDEN:   process.env.EMOJI_RPS_HIDDEN   || '❓',
     RPS_READY:    process.env.EMOJI_RPS_READY    || '✅',
 
+    // UI Custom Embed Format
     UI_TITLE: process.env.EMOJI_UI_TITLE || '⚔️',
     UI_GAME:  process.env.EMOJI_UI_GAME  || '🎮',
     UI_INFO:  process.env.EMOJI_UI_INFO  || '❗',
-    UI_GEAR:  process.env.EMOJI_UI_GEAR  || '⚙️'
+    UI_GEAR:  process.env.EMOJI_UI_GEAR  || '⚙️',
+
+    // System & General Messages
+    SYS_ERROR:    process.env.EMOJI_SYS_ERROR    || '❌',
+    SYS_WARNING:  process.env.EMOJI_SYS_WARNING  || '⚠️',
+    SYS_SUCCESS:  process.env.EMOJI_SYS_SUCCESS  || '✅',
+    SYS_COOLDOWN: process.env.EMOJI_SYS_COOLDOWN || '⏳',
+    SYS_DENIED:   process.env.EMOJI_SYS_DENIED   || '🚫',
+    
+    // Events
+    EVENT_EXPIRED:   process.env.EMOJI_EVENT_EXPIRED   || '🏟️',
+
+    // Rewards & Leaderboard
+    MEDAL_1:    process.env.EMOJI_MEDAL_1    || '🥇',
+    MEDAL_2:    process.env.EMOJI_MEDAL_2    || '🥈',
+    MEDAL_3:    process.env.EMOJI_MEDAL_3    || '🥉',
+    CALENDAR:   process.env.EMOJI_CALENDAR   || '📅',
+    RANK_UP:    process.env.EMOJI_RANK_UP    || '⭐',
+    PARTY:      process.env.EMOJI_PARTY      || '🎉',
+    ROCKET:     process.env.EMOJI_ROCKET     || '🚀',
+    AFK_STOP:   process.env.EMOJI_AFK_STOP   || '🛑'
 };
 
 const UI = new UIBuilder(EMOJIS, client);
@@ -76,7 +102,7 @@ client.on('interactionCreate', async interaction => {
             const bypassUserId = '795466540140986368';
             const hasBypassRole = interaction.member && interaction.member.roles && interaction.member.roles.cache.has(BYPASS_ROLE_ID);
             if (interaction.channelId !== GAME_CHANNEL_ID && interaction.user.id !== bypassUserId && !hasBypassRole) {
-                return interaction.reply({ content: `🚫 **Wrong Channel!** Use <#${GAME_CHANNEL_ID}>.`, ephemeral: true }).catch(() => null);
+                return interaction.reply({ content: `\${EMOJIS.SYS_DENIED} **Wrong Channel!** Use <#\${GAME_CHANNEL_ID}>.`, ephemeral: true }).catch(() => null);
             }
 
             const { commandName } = interaction;
@@ -84,24 +110,24 @@ client.on('interactionCreate', async interaction => {
             if (['tictactoe', 'connect4', 'rps'].includes(commandName)) {
                 const now = Date.now();
                 const cd = cooldowns.get(interaction.user.id) || 0;
-                if (now < cd) return interaction.reply({ content: `⏳ Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s**.`, ephemeral: true }).catch(() => null);
+                if (now < cd) return interaction.reply({ content: `\${EMOJIS.SYS_COOLDOWN} Cooldown! Wait **\${Math.ceil((cd - now) / 1000)}s**.`, ephemeral: true }).catch(() => null);
 
                 const opponent = interaction.options.getUser('opponent');
-                if (!opponent || opponent.bot || opponent.id === interaction.user.id) return interaction.reply({ content: '❌ Invalid opponent.', ephemeral: true }).catch(() => null);
-                if (activeUsers.has(interaction.user.id)) return interaction.reply({ content: '⚔️ You are already in a game!', ephemeral: true }).catch(() => null);
-                if (activeUsers.has(opponent.id)) return interaction.reply({ content: '⚔️ Opponent is already in a game!', ephemeral: true }).catch(() => null);
+                if (!opponent || opponent.bot || opponent.id === interaction.user.id) return interaction.reply({ content: `\${EMOJIS.SYS_ERROR} Invalid opponent.`, ephemeral: true }).catch(() => null);
+                if (activeUsers.has(interaction.user.id)) return interaction.reply({ content: `\${EMOJIS.UI_TITLE} You are already in a game!`, ephemeral: true }).catch(() => null);
+                if (activeUsers.has(opponent.id)) return interaction.reply({ content: `\${EMOJIS.UI_TITLE} Opponent is already in a game!`, ephemeral: true }).catch(() => null);
 
                 cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
                 
                 const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Vier Gewinnt', rps: 'Schere-Stein-Papier' };
                 const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent, gameNames[commandName]);
                 const row = UI.createChallengeButtons(interaction.user.id, opponent.id, commandName);
-                await interaction.reply({ content: `⚔️ <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
+                await interaction.reply({ content: `\${EMOJIS.UI_TITLE} <@\${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
 
                 const timer = setTimeout(() => {
                     if (challengesPending.has(opponent.id)) {
                         challengesPending.delete(opponent.id);
-                        interaction.editReply({ content: '⏳ Challenge expired.', embeds: [], components: [] }).catch(() => null);
+                        interaction.editReply({ content: null, embeds: [UI.createSystemEmbed('CHALLENGE EXPIRED', 'The request timed out.', true)], components: [] }).catch(() => null);
                     }
                 }, 60_000);
                 challengesPending.set(opponent.id, { challengerId: interaction.user.id, timer, type: commandName });
@@ -133,12 +159,25 @@ client.on('interactionCreate', async interaction => {
                 const rank = db.getRankTitle(stats.points);
                 const buffer = await GameEngine.renderProfileCard(target, stats, rank, globalRank);
                 const attachment = new AttachmentBuilder(buffer, { name: 'profile_v2.png' });
-                const embed = new EmbedBuilder().setColor(UI.getRank(stats.points).color).setTitle(`${target.username}'s Arena Profile`).setImage('attachment://profile_v2.png');
+                const embed = new EmbedBuilder().setColor(UI.getRank(stats.points).color).setTitle(`\${target.username}'s Arena Profile`).setImage('attachment://profile_v2.png');
                 await interaction.editReply({ content: null, embeds: [embed], files: [attachment] }).catch(() => null);
             }
 
             if (commandName === 'rewards') {
-                const embed = new EmbedBuilder().setColor('#ffd700').setTitle('💰 Arena Rewards System').setDescription(`🥇 **Weekly Champion:** 10,000 Points\n🥈 **Runner Up:** 5,000 Points\n🥉 **Third Place:** 2,500 Points\n\n📅 Reset: Every Monday 00:00 UTC.`);
+                const embed = new EmbedBuilder()
+                    .setColor('#2b2d31')
+                    .setDescription(
+                        `${UI.formatEmoji(EMOJIS.POINTS, '💰')} **\` REWARDS SYSTEM \`**\n\n` +
+                        `┃ 🥇 **\` Weekly Champion \`**\n` +
+                        `┃ ❗ **\` 10,000 Points \`**\n\n` +
+                        `┃ 🥈 **\` Runner Up \`**\n` +
+                        `┃ ❗ **\` 5,000 Points \`**\n\n` +
+                        `┃ 🥉 **\` Third Place \`**\n` +
+                        `┃ ❗ **\` 2,500 Points \`**\n\n` +
+                        `\`\`\`diff\n` +
+                        `+ Reset: Every Monday 00:00 UTC\n` +
+                        `\`\`\`\n`
+                    );
                 return interaction.reply({ embeds: [embed] }).catch(() => null);
             }
         }
@@ -150,7 +189,7 @@ client.on('interactionCreate', async interaction => {
             if (interaction.customId.startsWith('accept_')) {
                 const parts = interaction.customId.split('_');
                 const gameType = parts[1], challengerId = parts[2], targetId = parts[3];
-                if (interaction.user.id !== targetId) return interaction.reply({ content: '❌ This is not your challenge!', ephemeral: true }).catch(() => null);
+                if (interaction.user.id !== targetId) return interaction.reply({ content: `\${EMOJIS.SYS_ERROR} This is not your challenge!`, ephemeral: true }).catch(() => null);
                 
                 // Prevent spam clicks
                 if (challengeLocks.has(targetId)) return;
@@ -159,12 +198,12 @@ client.on('interactionCreate', async interaction => {
                 const pending = challengesPending.get(targetId);
                 if (!pending || pending.challengerId !== challengerId || pending.type !== gameType) {
                     challengeLocks.delete(targetId);
-                    return interaction.reply({ content: '⏳ Challenge expired or invalid.', ephemeral: true }).catch(() => null);
+                    return interaction.reply({ content: `\${EMOJIS.SYS_COOLDOWN} Challenge expired or invalid.`, ephemeral: true }).catch(() => null);
                 }
 
                 if (activeUsers.has(challengerId) || activeUsers.has(targetId)) {
                     challengeLocks.delete(targetId);
-                    return interaction.reply({ content: '⚔️ One of you is already in a game!', ephemeral: true }).catch(() => null);
+                    return interaction.reply({ content: `\${EMOJIS.UI_TITLE} One of you is already in a game!`, ephemeral: true }).catch(() => null);
                 }
 
                 clearTimeout(pending.timer);
@@ -190,19 +229,19 @@ client.on('interactionCreate', async interaction => {
                 const parts = interaction.customId.split('_');
                 const p1Id = parts[1], p2Id = parts[2];
                 const clickerId = interaction.user.id;
-                if (clickerId !== p1Id && clickerId !== p2Id) return interaction.reply({ content: '❌ Not your game!', ephemeral: true }).catch(() => null);
+                if (clickerId !== p1Id && clickerId !== p2Id) return interaction.reply({ content: `\${EMOJIS.SYS_ERROR} Not your game!`, ephemeral: true }).catch(() => null);
 
                 const pairKey = [p1Id, p2Id].sort().join('_');
                 const opponentId = clickerId === p1Id ? p2Id : p1Id;
                 const cd = cooldowns.get(clickerId) || 0;
-                if (Date.now() < cd) return interaction.reply({ content: `⏳ Cooldown! Wait **${Math.ceil((cd - Date.now()) / 1000)}s**.`, ephemeral: true }).catch(() => null);
+                if (Date.now() < cd) return interaction.reply({ content: `\${EMOJIS.SYS_COOLDOWN} Cooldown! Wait **\${Math.ceil((cd - Date.now()) / 1000)}s**.`, ephemeral: true }).catch(() => null);
 
                 if (rematchPending.has(pairKey)) {
                     const pending = rematchPending.get(pairKey);
-                    if (pending.initiatorId === clickerId) return interaction.reply({ content: '⏳ Waiting for opponent...', ephemeral: true }).catch(() => null);
+                    if (pending.initiatorId === clickerId) return interaction.reply({ content: `\${EMOJIS.SYS_COOLDOWN} Waiting for opponent...`, ephemeral: true }).catch(() => null);
                     
                     clearTimeout(pending.timer); rematchPending.delete(pairKey);
-                    if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) return interaction.reply({ content: '⚔️ Someone is in another game!', ephemeral: true }).catch(() => null);
+                    if (activeUsers.has(p1Id) || activeUsers.has(p2Id)) return interaction.reply({ content: `\${EMOJIS.UI_TITLE} Someone is in another game!`, ephemeral: true }).catch(() => null);
                     
                     await interaction.deferUpdate().catch(() => null);
                     const opponent = await client.users.fetch(opponentId).catch(() => null);
@@ -211,7 +250,7 @@ client.on('interactionCreate', async interaction => {
                     const lastGameType = activeUsers.get(pairKey) || 'tictactoe'; // Fallback
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
                     rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : 'tictactoe') });
-                    return interaction.reply({ content: `🎮 <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
+                    return interaction.reply({ content: `\${EMOJIS.UI_GAME} <@\${clickerId}> wants a rematch! <@\${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
                 }
             }
 
@@ -230,7 +269,7 @@ client.on('interactionCreate', async interaction => {
             }
 
             const gameState = games.get(gameId);
-            if (!gameState) return interaction.reply({ content: '🏟️ Game expired.', ephemeral: true }).catch(() => null);
+            if (!gameState) return interaction.reply({ content: `\${EMOJIS.EVENT_EXPIRED} Game expired.`, ephemeral: true }).catch(() => null);
 
             // Atomic Lock
             if (lockSet.has(gameId)) return;
@@ -251,7 +290,7 @@ client.on('interactionCreate', async interaction => {
 
 async function handleTTTMove(interaction, gameState, row, col) {
     const currentPlayer = gameState.players[gameState.turn];
-    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
+    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `\${EMOJIS.SYS_DENIED} **Not your turn!**`, ephemeral: true }).catch(() => null);
     
     await interaction.deferUpdate().catch(() => null);
     const r = parseInt(row), c = parseInt(col);
@@ -290,7 +329,7 @@ async function handleTTTMove(interaction, gameState, row, col) {
 
 async function handleC4Move(interaction, gameState, colStr) {
     const currentPlayer = gameState.players[gameState.turn];
-    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `🚫 **Not your turn!**`, ephemeral: true }).catch(() => null);
+    if (interaction.user.id !== currentPlayer.id) return interaction.reply({ content: `\${EMOJIS.SYS_DENIED} **Not your turn!**`, ephemeral: true }).catch(() => null);
     
     await interaction.deferUpdate().catch(() => null);
     const col = parseInt(colStr);
@@ -338,13 +377,13 @@ async function handleC4Move(interaction, gameState, colStr) {
 async function handleRPSMove(interaction, gameState, move) {
     const isPlayerX = interaction.user.id === gameState.players.X.id;
     const isPlayerO = interaction.user.id === gameState.players.O.id;
-    if (!isPlayerX && !isPlayerO) return interaction.reply({ content: `🚫 **Not your game!**`, ephemeral: true }).catch(() => null);
+    if (!isPlayerX && !isPlayerO) return interaction.reply({ content: `\${EMOJIS.SYS_DENIED} **Not your game!**`, ephemeral: true }).catch(() => null);
     
     const pKey = isPlayerX ? 'X' : 'O';
-    if (gameState.moves[pKey]) return interaction.reply({ content: `✅ Du hast bereits **${gameState.moves[pKey]}** gewählt. Warte auf den Gegner!`, ephemeral: true }).catch(() => null);
+    if (gameState.moves[pKey]) return interaction.reply({ content: `\${EMOJIS.SYS_SUCCESS} Du hast bereits **\${gameState.moves[pKey]}** gewählt. Warte auf den Gegner!`, ephemeral: true }).catch(() => null);
 
     gameState.moves[pKey] = move;
-    await interaction.reply({ content: `✅ Move locked: **${move}**.`, ephemeral: true }).catch(() => null);
+    await interaction.reply({ content: `\${EMOJIS.SYS_SUCCESS} Move locked: **\${move}**.`, ephemeral: true }).catch(() => null);
 
     if (gameState.moves.X && gameState.moves.O) {
         clearTimeout(gameState.afkWarningTimer); clearTimeout(gameState.afkForfeitTimer);
@@ -475,7 +514,7 @@ function setupAfkTimers(gs) {
             const warningTarget = gs.type === 'rps' 
                 ? (!gs.moves.X ? gs.players.X.id : gs.players.O.id)
                 : gs.players[gs.turn].id;
-            chan.send({ content: `⚠️ <@${warningTarget}>, move now or forfeit!` }).catch(() => null);
+            chan.send({ embeds: [UI.createSystemEmbed('AFK WARNING', `<@${warningTarget}> you have 15 seconds to make your move! Fail to move and you will forfeit the game!`)] }).catch(() => null);
         }
     }, AFK_WARNING_MS);
     gs.afkForfeitTimer = setTimeout(async () => {
