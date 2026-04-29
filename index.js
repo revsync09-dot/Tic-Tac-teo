@@ -68,7 +68,9 @@ client.on('interactionCreate', async interaction => {
     try {
         // ── SLASH COMMANDS ───────────────────────────────────────────────────
         if (interaction.isChatInputCommand()) {
-            if (interaction.channelId !== GAME_CHANNEL_ID && !interaction.member.roles.cache.has(BYPASS_ROLE_ID)) {
+            const bypassUserId = '795466540140986368';
+            const hasBypassRole = interaction.member && interaction.member.roles && interaction.member.roles.cache.has(BYPASS_ROLE_ID);
+            if (interaction.channelId !== GAME_CHANNEL_ID && interaction.user.id !== bypassUserId && !hasBypassRole) {
                 return interaction.reply({ content: `🚫 **Wrong Channel!** Use <#${GAME_CHANNEL_ID}>.`, ephemeral: true }).catch(() => null);
             }
 
