@@ -114,9 +114,9 @@ class UIBuilder {
             return pref.replace(/[^\d]/g, '');
         };
         return [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`rps_${gameId}_rock`).setEmoji(getSafeEmoji(this.emojis.RPS_ROCK, '🪨')).setLabel('Stein').setStyle(ButtonStyle.Primary).setDisabled(disabled),
-            new ButtonBuilder().setCustomId(`rps_${gameId}_paper`).setEmoji(getSafeEmoji(this.emojis.RPS_PAPER, '📄')).setLabel('Papier').setStyle(ButtonStyle.Primary).setDisabled(disabled),
-            new ButtonBuilder().setCustomId(`rps_${gameId}_scissors`).setEmoji(getSafeEmoji(this.emojis.RPS_SCISSORS, '✂️')).setLabel('Schere').setStyle(ButtonStyle.Primary).setDisabled(disabled)
+            new ButtonBuilder().setCustomId(`rps_${gameId}_rock`).setEmoji(getSafeEmoji(this.emojis.RPS_ROCK, '🪨')).setLabel('Rock').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`rps_${gameId}_paper`).setEmoji(getSafeEmoji(this.emojis.RPS_PAPER, '📄')).setLabel('Paper').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`rps_${gameId}_scissors`).setEmoji(getSafeEmoji(this.emojis.RPS_SCISSORS, '✂️')).setLabel('Scissors').setStyle(ButtonStyle.Primary).setDisabled(disabled)
         )];
     }
 

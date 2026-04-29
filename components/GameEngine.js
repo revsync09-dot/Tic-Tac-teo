@@ -154,7 +154,7 @@ class GameEngine {
         const readyImg = await this.getEmojiImage(emojis.RPS_READY);
 
         const drawMove = (moveStr, x, y, color) => {
-            const textMap = { 'rock': '🪨 STEIN', 'paper': '📄 PAPIER', 'scissors': '✂️ SCHERE', 'hidden': '❓ WARTET', 'ready': '✅ BEREIT' };
+            const textMap = { 'rock': '🪨 ROCK', 'paper': '📄 PAPER', 'scissors': '✂️ SCISSORS', 'hidden': '❓ WAITING', 'ready': '✅ READY' };
             const imgMap = { 'rock': rockImg, 'paper': paperImg, 'scissors': scissorsImg, 'hidden': hiddenImg, 'ready': readyImg };
             
             const img = imgMap[moveStr];

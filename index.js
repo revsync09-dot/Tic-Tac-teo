@@ -380,7 +380,7 @@ async function handleRPSMove(interaction, gameState, move) {
     if (!isPlayerX && !isPlayerO) return interaction.reply({ content: `${EMOJIS.SYS_DENIED} **Not your game!**`, ephemeral: true }).catch(() => null);
     
     const pKey = isPlayerX ? 'X' : 'O';
-    if (gameState.moves[pKey]) return interaction.reply({ content: `${EMOJIS.SYS_SUCCESS} Du hast bereits **${gameState.moves[pKey]}** gewählt. Warte auf den Gegner!`, ephemeral: true }).catch(() => null);
+    if (gameState.moves[pKey]) return interaction.reply({ content: `${EMOJIS.SYS_SUCCESS} You already picked **${gameState.moves[pKey]}**. Wait for your opponent!`, ephemeral: true }).catch(() => null);
 
     gameState.moves[pKey] = move;
     await interaction.reply({ content: `${EMOJIS.SYS_SUCCESS} Move locked: **${move}**.`, ephemeral: true }).catch(() => null);
@@ -391,10 +391,10 @@ async function handleRPSMove(interaction, gameState, move) {
         const winnerKey = evaluateRPSRound(gameState.moves.X, gameState.moves.O);
         let roundInfo = '';
         if (winnerKey === 'draw') {
-            roundInfo = 'RUNDE UNENTSCHIEDEN!';
+            roundInfo = 'ROUND DRAW!';
         } else {
             gameState.scores[winnerKey]++;
-            roundInfo = `${gameState.players[winnerKey].username} gewinnt die Runde!`;
+            roundInfo = `${gameState.players[winnerKey].username} wins the round!`;
         }
 
         const matchWinnerKey = gameState.scores.X === 2 ? 'X' : (gameState.scores.O === 2 ? 'O' : null);
@@ -425,6 +425,14 @@ async function handleRPSMove(interaction, gameState, move) {
         } else {
             setupAfkTimers(gameState);
         }
+    } else {
+        const buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, 'Waiting for opponent...', EMOJIS);
+        const attachment = new AttachmentBuilder(buffer, { name: 'rps_v2.png' });
+        const embed = UI.createRPSStatusEmbed(gameState.players.X, gameState.players.O, gameState.scores, gameState.round, null);
+        await interaction.message.edit({
+            content: null, embeds: [embed], files: [attachment],
+            components: UI.createRPSComponents(gameState.id, false)
+        }).catch(() => null);
     }
 }
 
