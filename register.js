@@ -9,17 +9,17 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('connect4')
-        .setDescription('Challenge someone to Vier Gewinnt (Connect 4)!')
+        .setDescription('Challenge someone to Connect 4!')
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('rps')
-        .setDescription('Challenge someone to Best-of-3 Schere-Stein-Papier!')
+        .setDescription('Challenge someone to Best-of-3 Rock Paper Scissors!')
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
         
     new SlashCommandBuilder()
         .setName('battleship')
-        .setDescription('Challenge someone to Schiffe Versenken (Battleship)!')
+        .setDescription('Challenge someone to Battleship!')
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
         
     new SlashCommandBuilder()

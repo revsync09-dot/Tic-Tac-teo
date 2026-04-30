@@ -125,7 +125,7 @@ client.on('interactionCreate', async interaction => {
 
                 cooldowns.set(interaction.user.id, now + COOLDOWN_MS);
                 
-                const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Vier Gewinnt', rps: 'Schere-Stein-Papier', battleship: 'Schiffe Versenken' };
+                const gameNames = { tictactoe: 'Tic Tac Toe', connect4: 'Connect 4', rps: 'Rock Paper Scissors', battleship: 'Battleship' };
                 const challengeEmbed = UI.createChallengeEmbed(interaction.user, opponent, gameNames[commandName]);
                 const row = UI.createChallengeButtons(interaction.user.id, opponent.id, commandName);
                 await interaction.reply({ content: `${EMOJIS.UI_TITLE} <@${opponent.id}>, you have been challenged!`, embeds: [challengeEmbed], components: [row] }).catch(() => null);
@@ -255,7 +255,7 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     const lastGameType = activeUsers.get(pairKey) || 'tictactoe'; // Fallback
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
-                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : (interaction.message.embeds[0]?.title?.includes('BATTLESHIP') ? 'battleship' : 'tictactoe')) });
+                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Rock') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Connect') ? 'connect4' : (interaction.message.embeds[0]?.title?.includes('BATTLESHIP') ? 'battleship' : 'tictactoe')) });
                     return interaction.reply({ content: `${EMOJIS.UI_GAME} <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
                 }
             }
@@ -427,7 +427,7 @@ async function handleC4Move(interaction, gameState, colStr) {
     const strongest = await db.getStrongestPlayer().catch(() => null);
     const buffer = await GameEngine.renderC4Board(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
     const attachment = new AttachmentBuilder(buffer, { name: 'c4_board.png' });
-    const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw, 'Vier Gewinnt', 'c4_board.png');
+    const embed = UI.createGameStatusEmbed(gameState.players.X, gameState.players.O, gameState.players[gameState.turn], gameState.winner, gameState.isDraw, 'Connect 4', 'c4_board.png');
 
     await interaction.editReply({
         content: null, embeds: [embed], files: [attachment],
@@ -617,7 +617,7 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
         } else if (type === 'connect4') {
             buffer = await GameEngine.renderC4Board(gameState.board, EMOJIS, gameState.players, strongest?.user_id);
             attachment = new AttachmentBuilder(buffer, { name: 'c4_board.png' });
-            embed = UI.createGameStatusEmbed(playerX, opponent, playerX, null, false, 'Vier Gewinnt', 'c4_board.png');
+            embed = UI.createGameStatusEmbed(playerX, opponent, playerX, null, false, 'Connect 4', 'c4_board.png');
             components = UI.createC4Components(gameState.board, false, gameId);
         } else if (type === 'rps') {
             buffer = await GameEngine.renderRPS(gameState.moves, gameState.players, 'Choose your action!', EMOJIS);
