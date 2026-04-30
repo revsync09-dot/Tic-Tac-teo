@@ -8,7 +8,9 @@ class UIBuilder {
 
     formatEmoji(id, fallback) {
         if (!id || id.length < 10) return fallback;
-        const emoji = this.client.emojis.cache.get(id.replace(/[^\d]/g, ''));
+        const cleanId = id.replace(/[^\d]/g, '');
+        if (!cleanId) return fallback;
+        const emoji = this.client.emojis.cache.get(cleanId);
         return emoji ? emoji.toString() : fallback;
     }
 
@@ -211,6 +213,7 @@ class UIBuilder {
     createVictoryAnnouncement(winner, streak, points, matchStats) {
         const titleEmoji = this.formatEmoji(this.emojis.WIN, '🏆');
         const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
+        const starEmoji = this.formatEmoji(this.emojis.RANK, '⭐');
         const rank = this.getRank(points);
 
         return new EmbedBuilder()
@@ -218,16 +221,16 @@ class UIBuilder {
             .setDescription(
                 `${titleEmoji} **\` MATCH CONCLUDED \`**\n\n` +
                 `┃ 👑 **\` Winner \`**\n` +
-                `┃ ❗ **<@${winner.id}>**\n\n` +
-                `┃ ${gearEmoji} **\` Stats \`**\n` +
+                `┃ ❗ <@${winner.id}>\n\n` +
+                `┃ ${gearEmoji} **\` Performance Stats \`**\n` +
                 `\`\`\`diff\n` +
-                `+ Rank:   ${rank.title}\n` +
-                `+ Streak: ${streak}\n` +
-                `+ Points: +3 (Total: ${points})\n` +
-                `+ Match:  ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n` +
+                `+ Rank:     ${rank.title}\n` +
+                `+ Streak:   ${streak}\n` +
+                `+ Points:   +3 (Total: ${points})\n` +
+                `+ Fidelity: ${matchStats.moves || '?'} moves in ${matchStats.duration || '?'}s\n` +
                 `\`\`\`\n` +
-                `**\` PROFILE \`**\n` +
-                `┃ 🔗 **\` Use /profile for more details \`**`
+                `**\` ARENA PROFILE \`**\n` +
+                `┃ 🔗 **\` Use /profile to view your ranking \`**`
             )
             .setTimestamp();
     }
