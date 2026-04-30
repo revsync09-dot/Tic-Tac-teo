@@ -122,20 +122,22 @@ class UIBuilder {
 
     createBSSetupEmbed(playerX, playerO, gs) {
         const titleEmoji = this.formatEmoji(this.emojis.BS_SHIP, '🚢');
-        const infoEmoji = this.formatEmoji(this.emojis.UI_INFO, '❗');
+        const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
         
-        const p1Ready = gs.ships.X.length === 5 ? '✅ Ready' : '⏳ Placing...';
-        const p2Ready = gs.ships.O.length === 5 ? '✅ Ready' : '⏳ Placing...';
+        const p1Ready = gs.ships.X.length === 5 ? 'READY' : 'SELECTING...';
+        const p2Ready = gs.ships.O.length === 5 ? 'READY' : 'SELECTING...';
 
         return new EmbedBuilder()
             .setColor('#2b2d31')
             .setDescription(
-                `${titleEmoji} **\` BATTLESHIP \`**\n\n` +
-                `┃ 👥 **\` Deployment Phase \`**\n` +
-                `┃ ❌ **<@${playerX.id}>**  \` ${p1Ready} \`\n` +
-                `┃ ⭕ **<@${playerO.id}>**  \` ${p2Ready} \`\n\n` +
+                `${titleEmoji} **\` BATTLESHIP: DEPLOYMENT \`**\n\n` +
+                `┃ 🛰️ **\` Satellite Uplink \`**\n` +
+                `┃ ❌ **<@${playerX.id}>**  \` STATUS: ${p1Ready} \`\n` +
+                `┃ ⭕ **<@${playerO.id}>**  \` STATUS: ${p2Ready} \`\n\n` +
+                `┃ ${gearEmoji} **\` Mission Briefing \`**\n` +
                 `\`\`\`diff\n` +
-                `+ Both players must click their Setup button to place 5 submarines.\n` +
+                `+ Deploy 5 Submarines to hidden coordinates.\n` +
+                `+ Click your setup button to open tactical map.\n` +
                 `\`\`\`\n`
             )
             .setTimestamp();
@@ -143,8 +145,8 @@ class UIBuilder {
 
     createBSSetupActionButtons(gameId, disabled = false) {
         return [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`bs_setup_X_${gameId}`).setLabel('Player 1 Setup').setStyle(ButtonStyle.Primary).setDisabled(disabled),
-            new ButtonBuilder().setCustomId(`bs_setup_O_${gameId}`).setLabel('Player 2 Setup').setStyle(ButtonStyle.Danger).setDisabled(disabled)
+            new ButtonBuilder().setCustomId(`bs_setup_X_${gameId}`).setLabel('🛠️ P1 Deployment').setStyle(ButtonStyle.Primary).setDisabled(disabled),
+            new ButtonBuilder().setCustomId(`bs_setup_O_${gameId}`).setLabel('🛠️ P2 Deployment').setStyle(ButtonStyle.Danger).setDisabled(disabled)
         )];
     }
 
@@ -181,20 +183,25 @@ class UIBuilder {
         const titleEmoji = gs.winner ? this.formatEmoji(this.emojis.WIN, '👑') : this.formatEmoji(this.emojis.BS_SHIP, '🚢');
         const gearEmoji = this.formatEmoji(this.emojis.UI_GEAR, '⚙️');
         
-        const titleText = gs.winner ? ` BATTLESHIP VICTORY ` : ` BATTLESHIP ACTIVE `;
+        const titleText = gs.winner ? ` BATTLESHIP: MISSION COMPLETE ` : ` BATTLESHIP: TACTICAL RADAR `;
         const p1Hits = gs.attacks.X.filter(a => gs.ships.O.includes(a)).length;
         const p2Hits = gs.attacks.O.filter(a => gs.ships.X.includes(a)).length;
         
+        const bar = (hits) => {
+            const total = 5;
+            return "▰".repeat(hits) + "▱".repeat(total - hits);
+        };
+
         return new EmbedBuilder()
             .setColor('#2b2d31')
             .setDescription(
                 `${titleEmoji} **\`${titleText}\`**\n\n` +
-                `┃ 👥 **\` Target Radars \`**\n` +
-                `┃ ❌ **<@${gs.players.X.id}>**  \` Submarines Destroyed: ${p1Hits}/5 \`\n` +
-                `┃ ⭕ **<@${gs.players.O.id}>**  \` Submarines Destroyed: ${p2Hits}/5 \`\n\n` +
-                `┃ ${gearEmoji} **\` Status \`**\n` +
+                `┃ 📊 **\` Fleet Integrity \`**\n` +
+                `┃ ❌ **<@${gs.players.X.id}>**  \`${bar(p1Hits)}\` \` ${p1Hits}/5 Hits \`\n` +
+                `┃ ⭕ **<@${gs.players.O.id}>**  \`${bar(p2Hits)}\` \` ${p2Hits}/5 Hits \`\n\n` +
+                `┃ ${gearEmoji} **\` Tactical Status \`**\n` +
                 `\`\`\`diff\n` +
-                (gs.winner ? `+ Winner: @${gs.winner.username}\n` : `+ Turn: @${gs.players[gs.turn].username}\n`) +
+                (gs.winner ? `+ WINNER: @${gs.winner.username}\n` : `+ SCANNING FOR: @${gs.players[gs.turn].username}\n`) +
                 `\`\`\`\n`
             )
             .setImage(`attachment://bs_v2.png`)

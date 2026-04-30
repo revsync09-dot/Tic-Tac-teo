@@ -255,7 +255,7 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     const lastGameType = activeUsers.get(pairKey) || 'tictactoe'; // Fallback
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
-                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : 'tictactoe') });
+                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Schere') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Vier') ? 'connect4' : (interaction.message.embeds[0]?.title?.includes('BATTLESHIP') ? 'battleship' : 'tictactoe')) });
                     return interaction.reply({ content: `${EMOJIS.UI_GAME} <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
                 }
             }

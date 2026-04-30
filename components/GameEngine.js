@@ -273,62 +273,159 @@ class GameEngine {
     }
 
     async renderBS(gameState, emojis) {
-        const width = 500, height = 300;
+        const width = 900, height = 500;
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
         
-        ctx.fillStyle = '#2b2d31';
+        // Background
+        ctx.fillStyle = '#060B11';
         ctx.fillRect(0, 0, width, height);
-        
-        const cellSize = 40;
-        const gridSpacing = 60;
-        const startX1 = 20;
-        const startX2 = 20 + 5 * cellSize + gridSpacing;
-        const startY = 60;
 
-        // Draw Player Headers
-        ctx.font = 'bold 18px sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.fillText(`Player 1 Radar`, startX1 + (5 * cellSize) / 2, 35);
-        ctx.fillText(`Player 2 Radar`, startX2 + (5 * cellSize) / 2, 35);
+        // subtle background grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.02)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < width; i += 20) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
+        for (let i = 0; i < height; i += 20) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke(); }
 
-        const waterImg = await this.getEmojiImage(emojis.BS_WATER) || null;
-        const hitImg = await this.getEmojiImage(emojis.BS_HIT) || null;
-        const missImg = await this.getEmojiImage(emojis.BS_MISS) || null;
+        const cellSize = 60;
+        const gridTotal = 5 * cellSize; 
+        const startY = 120;
+        const startX1 = 80;
+        const startX2 = width - 80 - gridTotal;
 
-        const drawGrid = (startX, attacks, enemyShips) => {
+        const drawRadar = (startX, attacks, enemyShips, isTurn, playerName, colorTheme) => {
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 24px "Courier New", Courier, monospace';
+            ctx.fillStyle = isTurn ? colorTheme : '#4a5568';
+            ctx.shadowColor = isTurn ? colorTheme : 'transparent';
+            ctx.shadowBlur = isTurn ? 15 : 0;
+            ctx.fillText(`${playerName.toUpperCase()}'S RADAR`, startX + gridTotal / 2, 60);
+            ctx.shadowBlur = 0;
+            
+            ctx.font = '14px "Courier New", Courier, monospace';
+            ctx.fillStyle = '#4a5568';
+            ctx.fillText(`UPLINK SECURE // TARGET ACQUIRED`, startX + gridTotal / 2, 85);
+
+            const cx = startX + gridTotal / 2;
+            const cy = startY + gridTotal / 2;
+            
+            const bgGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gridTotal / 1.5);
+            bgGrad.addColorStop(0, 'rgba(0, 255, 128, 0.15)');
+            bgGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(startX - 20, startY - 20, gridTotal + 40, gridTotal + 40);
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, gridTotal/1.4, -Math.PI/2, -Math.PI/4);
+            ctx.closePath();
+            const sweepGrad = ctx.createLinearGradient(cx, cy, cx + 100, cy - 100);
+            sweepGrad.addColorStop(0, 'rgba(0, 255, 128, 0.3)');
+            sweepGrad.addColorStop(1, 'rgba(0, 255, 128, 0)');
+            ctx.fillStyle = sweepGrad;
+            ctx.fill();
+
+            ctx.strokeStyle = 'rgba(0, 255, 128, 0.2)';
+            ctx.lineWidth = 1;
+            for(let i=1; i<=4; i++) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, i * (gridTotal/2.5) / 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            
+            ctx.beginPath(); ctx.moveTo(cx, startY - 20); ctx.lineTo(cx, startY + gridTotal + 20); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(startX - 20, cy); ctx.lineTo(startX + gridTotal + 20, cy); ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(0, 255, 128, 0.4)';
+            ctx.lineWidth = 2;
+            
             for (let r = 0; r < 5; r++) {
                 for (let c = 0; c < 5; c++) {
                     const x = startX + c * cellSize;
                     const y = startY + r * cellSize;
                     const cellId = `${r}_${c}`;
                     
-                    ctx.fillStyle = '#1e1f22';
-                    ctx.fillRect(x, y, cellSize - 2, cellSize - 2);
-                    
-                    if (waterImg) ctx.drawImage(waterImg, x + 2, y + 2, cellSize - 6, cellSize - 6);
+                    ctx.strokeRect(x, y, cellSize, cellSize);
                     
                     if (attacks.includes(cellId)) {
                         const isHit = enemyShips.includes(cellId);
-                        const img = isHit ? hitImg : missImg;
-                        if (img) ctx.drawImage(img, x + 2, y + 2, cellSize - 6, cellSize - 6);
-                        else {
-                            ctx.font = '20px Arial';
-                            ctx.textAlign = 'center';
-                            ctx.textBaseline = 'middle';
-                            ctx.fillText(isHit ? '💥' : '🌊', x + cellSize/2, y + cellSize/2);
+                        
+                        if (isHit) {
+                            ctx.fillStyle = 'rgba(255, 0, 85, 0.2)';
+                            ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+                            
+                            ctx.strokeStyle = '#ff0055';
+                            ctx.lineWidth = 3;
+                            ctx.shadowColor = '#ff0055';
+                            ctx.shadowBlur = 10;
+                            
+                            ctx.beginPath();
+                            const p = 15;
+                            ctx.moveTo(x + p, y + p); ctx.lineTo(x + cellSize - p, y + cellSize - p);
+                            ctx.moveTo(x + cellSize - p, y + p); ctx.lineTo(x + p, y + cellSize - p);
+                            ctx.stroke();
+                            
+                            ctx.shadowBlur = 0;
+                        } else {
+                            ctx.fillStyle = 'rgba(0, 240, 255, 0.1)';
+                            ctx.fillRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+                            
+                            ctx.fillStyle = '#00f0ff';
+                            ctx.shadowColor = '#00f0ff';
+                            ctx.shadowBlur = 8;
+                            ctx.beginPath();
+                            ctx.arc(x + cellSize/2, y + cellSize/2, 6, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.shadowBlur = 0;
                         }
                     }
                 }
             }
+            
+            ctx.fillStyle = 'rgba(0, 255, 128, 0.6)';
+            ctx.font = '16px "Courier New", Courier, monospace';
+            const letters = ['A', 'B', 'C', 'D', 'E'];
+            for(let i=0; i<5; i++) {
+                ctx.fillText(letters[i], startX + i * cellSize + cellSize/2, startY - 10);
+                ctx.fillText((i+1).toString(), startX - 15, startY + i * cellSize + cellSize/2 + 5);
+            }
+            
+            ctx.strokeStyle = colorTheme;
+            ctx.lineWidth = 3;
+            const cs = 15; 
+            const off = 10;
+            ctx.beginPath(); ctx.moveTo(startX - off, startY - off + cs); ctx.lineTo(startX - off, startY - off); ctx.lineTo(startX - off + cs, startY - off); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(startX + gridTotal + off - cs, startY - off); ctx.lineTo(startX + gridTotal + off, startY - off); ctx.lineTo(startX + gridTotal + off, startY - off + cs); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(startX - off, startY + gridTotal + off - cs); ctx.lineTo(startX - off, startY + gridTotal + off); ctx.lineTo(startX - off + cs, startY + gridTotal + off); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(startX + gridTotal + off - cs, startY + gridTotal + off); ctx.lineTo(startX + gridTotal + off, startY + gridTotal + off); ctx.lineTo(startX + gridTotal + off, startY + gridTotal + off - cs); ctx.stroke();
+
+            // Tactical Data Readouts
+            ctx.font = '9px "Courier New", Courier, monospace';
+            ctx.fillStyle = 'rgba(0, 255, 128, 0.4)';
+            ctx.textAlign = 'left';
+            const dataLines = [
+                `SEQ_ID: ${Math.random().toString(36).substring(7).toUpperCase()}`,
+                `COORDS: ${Math.floor(Math.random()*90)}.${Math.floor(Math.random()*99)}'N`,
+                `SONAR: ACTIVE`,
+                `UPLINK: STABLE`
+            ];
+            dataLines.forEach((line, i) => {
+                ctx.fillText(line, startX + gridTotal + 15, startY + i * 12);
+            });
         };
 
-        // P1's Radar (Attacks made by X, enemy is O)
-        drawGrid(startX1, gameState.attacks.X, gameState.ships.O);
-        
-        // P2's Radar (Attacks made by O, enemy is X)
-        drawGrid(startX2, gameState.attacks.O, gameState.ships.X);
+        const turnX = gameState.turn === 'X' || gameState.winner;
+        const turnO = gameState.turn === 'O' || gameState.winner;
+
+        drawRadar(startX1, gameState.attacks.X, gameState.ships.O, turnX, gameState.players.X.username, '#00ffaa');
+        drawRadar(startX2, gameState.attacks.O, gameState.ships.X, turnO, gameState.players.O.username, '#00ffaa');
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(width/2, 50);
+        ctx.lineTo(width/2, height - 50);
+        ctx.stroke();
 
         return canvas.toBuffer('image/png');
     }
