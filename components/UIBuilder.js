@@ -353,20 +353,28 @@ class UIBuilder {
         const titleEmoji = gs.winner ? this.formatEmoji(this.emojis.WIN, '👑') : '🃏';
         const titleText = gs.winner ? ` UNO: CHAMPION DECLARED ` : ` UNO: TACTICAL MATCH `;
         
+        const playerList = gs.playerOrder.map(pKey => {
+            const p = gs.players[pKey];
+            const isTurn = gs.turn === pKey;
+            return `┃ ${isTurn ? '▶️' : '👤'} **<@${p.id}>** \` ${p.hand.length} Cards \``;
+        }).join('\n');
+
+        const topCard = gs.discard[gs.discard.length - 1];
+        const colorLabel = topCard.chosenColor ? `${topCard.color} (${topCard.chosenColor})` : topCard.color;
+
         return new EmbedBuilder()
             .setColor('#2b2d31')
             .setDescription(
                 `${titleEmoji} **\`${titleText}\`**\n\n` +
                 `┃ 👥 **\` Players \`**\n` +
-                `┃ ❌ **<@${gs.players.X.id}>**  \` ${gs.players.X.hand.length} Cards \`\n` +
-                `┃ ⭕ **<@${gs.players.O.id}>**  \` ${gs.players.O.hand.length} Cards \`\n\n` +
+                `${playerList}\n\n` +
                 `┃ 🃏 **\` Top Card \`**\n` +
                 `\`\`\`diff\n` +
-                `+ ${gs.discard[gs.discard.length - 1].color.toUpperCase()} ${gs.discard[gs.discard.length - 1].value.toUpperCase()}\n` +
+                `+ ${colorLabel.toUpperCase()} ${topCard.value.toUpperCase()}\n` +
                 `\`\`\`\n` +
                 `┃ ⚙️ **\` Status \`**\n` +
                 `\`\`\`diff\n` +
-                (gs.winner ? `+ WINNER: @${gs.winner.username}\n` : `+ Turn: @${gs.players[gs.turn].username}\n`) +
+                (gs.winner ? `+ WINNER: ${gs.winner.username}\n` : `+ Current Turn: ${gs.players[gs.turn].username}\n`) +
                 `\`\`\`\n`
             )
             .setImage(`attachment://uno_v2.png`)
