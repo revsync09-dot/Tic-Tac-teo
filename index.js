@@ -801,10 +801,9 @@ async function updateUnoGame(interaction, gs) {
     } catch (e) { console.error('Uno Update Error', e); }
 
     if (interaction.isButton() && interaction.deferred) {
-        // If we were in an ephemeral hand, we might want to close it or update it
-        await interaction.editReply({ content: `✅ Move processed!`, components: [] }).catch(() => null);
+        await interaction.editReply({ content: `✅ Action processed! Check your hand if needed.` }).catch(() => null);
     } else if (interaction.isButton() && !interaction.replied) {
-         await interaction.update({ content: `✅ Move processed!`, components: [] }).catch(() => null);
+         await interaction.update({ content: `✅ Action processed!` }).catch(() => null);
     }
     
     setupAfkTimers(gs);
