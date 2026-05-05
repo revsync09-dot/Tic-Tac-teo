@@ -565,6 +565,42 @@ class GameEngine {
         return canvas.toBuffer();
     }
 
+    async renderHand(hand) {
+        const cardW = 120, cardH = 180, gap = 10;
+        const width = (cardW + gap) * Math.min(hand.length, 5) + gap;
+        const height = (cardH + gap) * Math.ceil(hand.length / 5) + gap;
+        
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        
+        ctx.fillStyle = '#2b2d31';
+        ctx.fillRect(0, 0, width, height);
+
+        for (let i = 0; i < hand.length; i++) {
+            const card = hand[i];
+            const img = await this.getUnoCardImage(card);
+            if (img) {
+                const x = gap + (i % 5) * (cardW + gap);
+                const y = gap + Math.floor(i / 5) * (cardH + gap);
+                
+                ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                ctx.shadowBlur = 10;
+                ctx.drawImage(img, x, y, cardW, cardH);
+                
+                // Card Number Label
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(x + 5, y + 5, 25, 25);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(i + 1, x + 17.5, y + 23);
+            }
+        }
+
+        return canvas.toBuffer();
+    }
+
     drawUnoCard(ctx, x, y, w, h, card) {
         // Obsolete, replaced by getUnoCardImage and direct drawing
     }

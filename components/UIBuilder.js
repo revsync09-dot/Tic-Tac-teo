@@ -382,34 +382,37 @@ class UIBuilder {
     }
 
     createUnoComponents(gs) {
-        return [
-            new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`uno_view_hand_${gs.id}`).setLabel('View Hand').setStyle(ButtonStyle.Primary),
-                new ButtonBuilder().setCustomId(`uno_draw_${gs.id}`).setLabel('Draw Card').setStyle(ButtonStyle.Danger)
-            )
-        ];
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`uno_vh_${gs.id}`).setLabel('View Hand').setStyle(ButtonStyle.Primary),
+            new ButtonBuilder().setCustomId(`uno_draw_${gs.id}`).setLabel('Draw Card').setStyle(ButtonStyle.Danger)
+        );
+        
+        const currentPlayer = gs.players[gs.turn];
+        if (currentPlayer && currentPlayer.hand.length <= 2) {
+            row.addComponents(
+                new ButtonBuilder().setCustomId(`uno_call_${gs.id}`).setLabel('UNO!').setStyle(ButtonStyle.Success)
+            );
+        }
+
+        return [row];
     }
 
     createUnoHandComponents(gs, pKey) {
         const hand = gs.players[pKey].hand;
         const page = gs.page[pKey] || 0;
-        const perPage = 5;
-        const maxPage = Math.ceil(hand.length / perPage) - 1;
+        const pageSize = 5;
+        const maxPage = Math.ceil(hand.length / pageSize) - 1;
         
         const row1 = new ActionRowBuilder();
-        const start = page * perPage;
-        const end = Math.min(start + perPage, hand.length);
+        const start = page * pageSize;
+        const end = Math.min(start + pageSize, hand.length);
 
         for (let i = start; i < end; i++) {
-            const card = hand[i];
-            const colors = { red: ButtonStyle.Danger, blue: ButtonStyle.Primary, green: ButtonStyle.Success, yellow: ButtonStyle.Secondary, black: ButtonStyle.Secondary };
-            const labels = { skip: 'Ø', reverse: '⇄', draw2: '+2', wild: 'W', wild4: '+4' };
-            
             row1.addComponents(
                 new ButtonBuilder()
                     .setCustomId(`uno_play_${gs.id}_${i}`)
-                    .setLabel(labels[card.value] || card.value)
-                    .setStyle(colors[card.color])
+                    .setLabel(`Card ${i + 1}`)
+                    .setStyle(ButtonStyle.Secondary)
                     .setDisabled(gs.turn !== pKey || gs.winner)
             );
         }
@@ -426,7 +429,6 @@ class UIBuilder {
     createUnoWildComponents(gameId, cardIndex) {
         return [
             new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_red`).setLabel('Red').setStyle(ButtonStyle.Danger),
                 new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_blue`).setLabel('Blue').setStyle(ButtonStyle.Primary),
                 new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_green`).setLabel('Green').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_yellow`).setLabel('Yellow').setStyle(ButtonStyle.Secondary)

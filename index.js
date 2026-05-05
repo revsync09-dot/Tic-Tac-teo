@@ -400,8 +400,9 @@ client.on('interactionCreate', async interaction => {
             } else if (customId.startsWith('rps_')) {
                 [, gameId, action] = parts;
             } else if (customId.startsWith('uno_')) {
-                gameId = parts[2];
+                // Format: uno_action_gameId_param1_param2
                 action = parts[1];
+                gameId = parts[2];
                 const gameState = games.get(gameId);
                 if (!gameState) return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Game expired.`, ephemeral: true }).catch(() => null);
                 await handleUnoMove(interaction, gameState, action, parts.slice(3));
@@ -646,30 +647,55 @@ async function handleUnoMove(interaction, gs, action, params) {
         return;
     }
 
-    if (action === 'view_hand') {
+    if (action === 'vh') {
+        const buffer = await GameEngine.renderHand(hand);
+        const attachment = new AttachmentBuilder(buffer, { name: 'hand.png' });
         await interaction.reply({ 
             content: `**Your Uno Hand**\nTop Card: **${topCard.color.toUpperCase()} ${topCard.value.toUpperCase()}**`, 
+            files: [attachment],
             components: UI.createUnoHandComponents(gs, pKey), 
             ephemeral: true 
         }).catch(() => null);
         return;
     }
 
+    if (action === 'call') {
+        if (hand.length > 2) return interaction.reply({ content: `You can only call UNO if you have 2 cards or less!`, ephemeral: true }).catch(() => null);
+        if (!gs.unoCalled) gs.unoCalled = new Set();
+        gs.unoCalled.add(pKey);
+        await interaction.reply({ content: `📣 **UNO!** <@${interaction.user.id}> has called UNO!`, ephemeral: false }).catch(() => null);
+        return;
+    }
+
     if (action === 'draw') {
+        // Enforce "Draw only if needed"
+        const hasPlayable = hand.some(c => 
+            c.color === topCard.color || c.color === 'black' || 
+            c.value === topCard.value || (topCard.color === 'black' && topCard.chosenColor === c.color)
+        );
+        if (hasPlayable) return interaction.reply({ content: `${EMOJIS.SYS_ERROR} You have playable cards! You cannot draw.`, ephemeral: true }).catch(() => null);
+
         const card = gs.deck.pop();
         hand.push(card);
+        if (gs.unoCalled) gs.unoCalled.delete(pKey); // UNO call is void if you draw
         if (gs.deck.length === 0) {
             gs.deck = gs.discard.slice(0, -1);
             gs.discard = [topCard];
             shuffle(gs.deck);
         }
-        await interaction.reply({ content: `You drew a **${card.color} ${card.value}**!`, ephemeral: true }).catch(() => null);
+
+        // If drawn card matches, let them play it or stay in turn
+        const canPlayDrawn = card.color === topCard.color || card.color === 'black' || card.value === topCard.value;
         
-        // Move to next turn
-        const nextIdx = getNextTurnIndex(gs);
-        gs.turn = gs.playerOrder[nextIdx];
-        
-        await updateUnoGame(interaction, gs);
+        if (canPlayDrawn) {
+            await interaction.reply({ content: `You drew a **${card.color} ${card.value}**! You can play it now.`, ephemeral: true }).catch(() => null);
+            await updateUnoGame(interaction, gs);
+        } else {
+            await interaction.reply({ content: `You drew a **${card.color} ${card.value}**. Passing turn...`, ephemeral: true }).catch(() => null);
+            const nextIdx = getNextTurnIndex(gs);
+            gs.turn = gs.playerOrder[nextIdx];
+            await updateUnoGame(interaction, gs);
+        }
         return;
     }
 
@@ -722,6 +748,9 @@ async function executeUnoPlay(interaction, gs, pKey, index) {
 
     if (reverse) gs.reverse = !gs.reverse;
 
+    // Reset UNO call for the player who just played
+    if (gs.unoCalled) gs.unoCalled.delete(pKey);
+
     if (drawCount > 0) {
         const nextIdx = getNextTurnIndex(gs);
         const nextPKey = gs.playerOrder[nextIdx];
@@ -736,9 +765,27 @@ async function executeUnoPlay(interaction, gs, pKey, index) {
         }
     }
 
+    if (hand.length === 1) {
+        // Check if UNO was called
+        if (!gs.unoCalled || !gs.unoCalled.has(pKey)) {
+            // Penalty: +4 cards
+            for (let i = 0; i < 4; i++) {
+                if (gs.deck.length === 0) {
+                    const top = gs.discard.pop();
+                    gs.deck = gs.discard;
+                    gs.discard = [top];
+                    shuffle(gs.deck);
+                }
+                hand.push(gs.deck.pop());
+            }
+            if (interaction.channel) {
+                interaction.channel.send({ content: `⚠️ <@${interaction.user.id}> forgot to call **UNO**! Penalty: **+4 Cards**.` }).catch(() => null);
+            }
+        }
+    }
+
     if (hand.length === 0) {
         gs.winner = gs.players[pKey];
-        // Stats only for 1v1 usually, but let's just win
         await updateUnoGame(interaction, gs);
         await finishGame(interaction, gs, pKey);
         return;
