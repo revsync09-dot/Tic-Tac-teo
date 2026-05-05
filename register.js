@@ -23,6 +23,13 @@ const commands = [
         .addUserOption(opt => opt.setName('opponent').setDescription('Who do you want to challenge?').setRequired(true)),
         
     new SlashCommandBuilder()
+        .setName('uno')
+        .setDescription('Challenge up to 3 people to a game of Uno!')
+        .addUserOption(opt => opt.setName('opponent1').setDescription('First opponent').setRequired(true))
+        .addUserOption(opt => opt.setName('opponent2').setDescription('Second opponent').setRequired(false))
+        .addUserOption(opt => opt.setName('opponent3').setDescription('Third opponent').setRequired(false)),
+        
+    new SlashCommandBuilder()
         .setName('leaderboard')
         .setDescription('🏆 View the global Hall of Legends'),
 

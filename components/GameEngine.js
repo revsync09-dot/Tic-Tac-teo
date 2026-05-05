@@ -429,6 +429,131 @@ class GameEngine {
 
         return canvas.toBuffer('image/png');
     }
+
+    async getUnoCardImage(card) {
+        const baseUrl = 'https://raw.githubusercontent.com/celsiusnarhwal/uno/main/cards/';
+        let filename = '';
+        const colors = { red: 'R', blue: 'B', green: 'G', yellow: 'Y' };
+        const values = { skip: 'S', reverse: 'R', draw2: 'A2' };
+
+        if (card.color === 'black') {
+            filename = card.value === 'wild' ? 'WC.png' : 'W4.png';
+        } else {
+            const colorPrefix = colors[card.color];
+            const valueSuffix = values[card.value] || card.value;
+            filename = `${colorPrefix}${valueSuffix}.png`;
+        }
+
+        const url = `${baseUrl}${filename}`;
+        if (this.emojiCache.has(url)) return this.emojiCache.get(url);
+        
+        try {
+            const img = await loadImage(url).catch(() => null);
+            if (img) this.emojiCache.set(url, img);
+            return img;
+        } catch { return null; }
+    }
+
+    async renderUno(gs) {
+        const width = 800, height = 800;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        
+        // Premium Table Background
+        const grad = ctx.createRadialGradient(width/2, height/2, 50, width/2, height/2, width/1.5);
+        grad.addColorStop(0, '#1e3a8a'); grad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = grad; ctx.fillRect(0, 0, width, height);
+
+        // Subgrid/Texture
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < width; i += 40) { ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, height); ctx.stroke(); }
+        for (let i = 0; i < height; i += 40) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(width, i); ctx.stroke(); }
+
+        // Center Table
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(width/2, height/2, 250, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+
+        const topCard = gs.discard[gs.discard.length - 1];
+        const cardImg = await this.getUnoCardImage(topCard);
+        
+        // Draw Top Card in Center
+        if (cardImg) {
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 20;
+            ctx.drawImage(cardImg, width/2 - 60, height/2 - 90, 120, 180);
+            ctx.shadowBlur = 0;
+        }
+
+        // Draw Player Positions (Bottom, Left, Top, Right)
+        const players = gs.playerOrder; // Array of pKeys (e.g., ['X', 'O', 'P3', 'P4'])
+        const positions = [
+            { x: width/2, y: height - 80, rot: 0 },    // Bottom (Self/Current)
+            { x: 80, y: height/2, rot: Math.PI/2 },    // Left
+            { x: width/2, y: 80, rot: Math.PI },       // Top
+            { x: width - 80, y: height/2, rot: -Math.PI/2 } // Right
+        ];
+
+        ctx.textAlign = 'center';
+        for (let i = 0; i < players.length; i++) {
+            const pKey = players[i];
+            const player = gs.players[pKey];
+            const pos = positions[i];
+            const isTurn = gs.turn === pKey;
+
+            ctx.save();
+            ctx.translate(pos.x, pos.y);
+            ctx.rotate(pos.rot);
+
+            // Turn Indicator Glow
+            if (isTurn) {
+                ctx.shadowColor = '#00ffaa';
+                ctx.shadowBlur = 15;
+                ctx.fillStyle = '#00ffaa';
+            } else {
+                ctx.fillStyle = '#ffffff';
+            }
+
+            ctx.font = 'bold 24px sans-serif';
+            ctx.fillText(player.username.toUpperCase(), 0, 0);
+            ctx.font = '16px sans-serif';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.fillText(`${player.hand.length} CARDS`, 0, 25);
+
+            // Draw card back visual
+            ctx.fillStyle = '#ff3333';
+            this.drawRoundedRect(ctx, -20, 40, 40, 60, 5);
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        // Direction Indicator
+        ctx.save();
+        ctx.translate(width/2, height/2);
+        ctx.rotate(gs.reverse ? -gs.moveCount * 0.2 : gs.moveCount * 0.2);
+        ctx.strokeStyle = '#00ffaa';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 200, -0.2, 0.2);
+        ctx.stroke();
+        // arrow head
+        ctx.restore();
+
+        return canvas.toBuffer();
+    }
+
+    drawUnoCard(ctx, x, y, w, h, card) {
+        // Obsolete, replaced by getUnoCardImage and direct drawing
+    }
 }
 
 module.exports = new GameEngine();

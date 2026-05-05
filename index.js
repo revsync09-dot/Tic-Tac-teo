@@ -16,6 +16,7 @@ const lockSet         = new Set();   // atomic move locks
 const challengeLocks  = new Set();   // prevents double-acceptance
 const rematchPending  = new Map(); // pairKey → { initiatorId, timer }
 const challengesPending = new Map(); // targetId → { challengerId, timer }
+const lobbies          = new Map(); // challengerId → { targets, accepted, type }
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 const GUILD_ID        = process.env.GUILD_ID;
@@ -113,10 +114,35 @@ client.on('interactionCreate', async interaction => {
 
             const { commandName } = interaction;
 
-            if (['tictactoe', 'connect4', 'rps', 'battleship'].includes(commandName)) {
+            if (['tictactoe', 'connect4', 'rps', 'battleship', 'uno'].includes(commandName)) {
                 const now = Date.now();
                 const cd = cooldowns.get(interaction.user.id) || 0;
                 if (now < cd) return interaction.reply({ content: `${EMOJIS.SYS_COOLDOWN} Cooldown! Wait **${Math.ceil((cd - now) / 1000)}s**.`, ephemeral: true }).catch(() => null);
+
+                if (commandName === 'uno') {
+                    const targets = [
+                        interaction.options.getUser('opponent1'),
+                        interaction.options.getUser('opponent2'),
+                        interaction.options.getUser('opponent3')
+                    ].filter(u => u && !u.bot && u.id !== interaction.user.id);
+
+                    if (targets.length === 0) return interaction.reply({ content: `${EMOJIS.SYS_ERROR} Invalid opponents.`, ephemeral: true }).catch(() => null);
+                    
+                    const lobby = { challenger: interaction.user, targets, accepted: [], type: 'uno', timer: null };
+                    lobbies.set(interaction.user.id, lobby);
+                    
+                    const embed = UI.createLobbyEmbed(lobby);
+                    const row = UI.createLobbyButtons(interaction.user.id);
+                    await interaction.reply({ content: `${EMOJIS.UI_TITLE} Uno Lobby Created!`, embeds: [embed], components: [row] }).catch(() => null);
+                    
+                    lobby.timer = setTimeout(() => {
+                        if (lobbies.has(interaction.user.id)) {
+                            lobbies.delete(interaction.user.id);
+                            interaction.editReply({ content: null, embeds: [UI.createSystemEmbed('LOBBY EXPIRED', 'The request timed out.', true)], components: [] }).catch(() => null);
+                        }
+                    }, 120_000);
+                    return;
+                }
 
                 const opponent = interaction.options.getUser('opponent');
                 if (!opponent || opponent.bot || opponent.id === interaction.user.id) return interaction.reply({ content: `${EMOJIS.SYS_ERROR} Invalid opponent.`, ephemeral: true }).catch(() => null);
@@ -191,6 +217,37 @@ client.on('interactionCreate', async interaction => {
         // ── BUTTONS ───────────────────────────────────────────────────────────
         if (interaction.isButton()) {
             
+            // LOBBY JOIN button
+            if (interaction.customId.startsWith('join_')) {
+                const challengerId = interaction.customId.split('_')[1];
+                const lobby = lobbies.get(challengerId);
+                if (!lobby) return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Lobby expired.`, ephemeral: true }).catch(() => null);
+                
+                if (!lobby.targets.some(u => u.id === interaction.user.id)) return interaction.reply({ content: `${EMOJIS.SYS_DENIED} You are not invited!`, ephemeral: true }).catch(() => null);
+                if (lobby.accepted.some(u => u.id === interaction.user.id)) return interaction.reply({ content: `${EMOJIS.SYS_WARNING} You already joined!`, ephemeral: true }).catch(() => null);
+                
+                lobby.accepted.push(interaction.user);
+                await interaction.update({ embeds: [UI.createLobbyEmbed(lobby)], components: [UI.createLobbyButtons(challengerId)] }).catch(() => null);
+                return;
+            }
+
+            // LOBBY START button
+            if (interaction.customId.startsWith('start_')) {
+                const challengerId = interaction.customId.split('_')[1];
+                if (interaction.user.id !== challengerId) return interaction.reply({ content: `${EMOJIS.SYS_DENIED} Only the host can start!`, ephemeral: true }).catch(() => null);
+                
+                const lobby = lobbies.get(challengerId);
+                if (!lobby) return;
+                if (lobby.accepted.length === 0) return interaction.reply({ content: `${EMOJIS.SYS_ERROR} At least 2 players required!`, ephemeral: true }).catch(() => null);
+                
+                clearTimeout(lobby.timer);
+                lobbies.delete(challengerId);
+                
+                const players = [lobby.challenger, ...lobby.accepted];
+                await startMultiplayerGame(interaction, players, lobby.type);
+                return;
+            }
+
             // ACCEPT BATTLE button
             if (interaction.customId.startsWith('accept_')) {
                 const parts = interaction.customId.split('_');
@@ -255,9 +312,24 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     const lastGameType = activeUsers.get(pairKey) || 'tictactoe'; // Fallback
                     const timer = setTimeout(() => { rematchPending.delete(pairKey); }, 60_000);
-                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Rock') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Connect') ? 'connect4' : (interaction.message.embeds[0]?.title?.includes('BATTLESHIP') ? 'battleship' : 'tictactoe')) });
+                    rematchPending.set(pairKey, { initiatorId: clickerId, timer, gameType: interaction.message.embeds[0]?.title?.includes('Rock') ? 'rps' : (interaction.message.embeds[0]?.title?.includes('Connect') ? 'connect4' : (interaction.message.embeds[0]?.title?.includes('BATTLESHIP') ? 'battleship' : (interaction.message.embeds[0]?.title?.includes('Uno') ? 'uno' : 'tictactoe'))) });
                     return interaction.reply({ content: `${EMOJIS.UI_GAME} <@${clickerId}> wants a rematch! <@${opponentId}> — click **Rematch**!`, ephemeral: false }).catch(() => null);
                 }
+            }
+            // UNO
+            if (interaction.customId.startsWith('uno_')) {
+                const parts = interaction.customId.split('_');
+                const action = parts[1]; // play, draw, wild, page
+                const gameId = parts[2];
+                const gs = games.get(gameId);
+                
+                if (!gs) return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Game expired.`, ephemeral: true }).catch(() => null);
+                if (interaction.user.id !== gs.players[gs.turn].id && action !== 'page') {
+                    return interaction.reply({ content: `${EMOJIS.SYS_DENIED} Not your turn!`, ephemeral: true }).catch(() => null);
+                }
+
+                await handleUnoMove(interaction, gs, action, parts.slice(3));
+                return;
             }
             // BATTLESHIP
             if (interaction.customId.startsWith('bs_setup_') || interaction.customId.startsWith('bs_place_') || interaction.customId.startsWith('bs_attack_')) {
@@ -550,6 +622,210 @@ async function handleBSAttack(interaction, gs, pKey, rStr, cStr) {
     }
 }
 
+async function handleUnoMove(interaction, gs, action, params) {
+    const pKey = interaction.user.id;
+    const hand = gs.players[pKey].hand;
+    const topCard = gs.discard[gs.discard.length - 1];
+
+    if (action === 'page') {
+        const dir = parseInt(params[0]);
+        gs.page[pKey] = Math.max(0, gs.page[pKey] + dir);
+        await interaction.update({ components: UI.createUnoHandComponents(gs, pKey) }).catch(() => null);
+        return;
+    }
+
+    if (action === 'view_hand') {
+        await interaction.reply({ 
+            content: `**Your Uno Hand**\nTop Card: **${topCard.color.toUpperCase()} ${topCard.value.toUpperCase()}**`, 
+            components: UI.createUnoHandComponents(gs, pKey), 
+            ephemeral: true 
+        }).catch(() => null);
+        return;
+    }
+
+    if (action === 'draw') {
+        const card = gs.deck.pop();
+        hand.push(card);
+        if (gs.deck.length === 0) {
+            gs.deck = gs.discard.slice(0, -1);
+            gs.discard = [topCard];
+            shuffle(gs.deck);
+        }
+        await interaction.reply({ content: `You drew a **${card.color} ${card.value}**!`, ephemeral: true }).catch(() => null);
+        
+        // Move to next turn
+        const nextIdx = getNextTurnIndex(gs);
+        gs.turn = gs.playerOrder[nextIdx];
+        
+        await updateUnoGame(interaction, gs);
+        return;
+    }
+
+    if (action === 'play') {
+        const index = parseInt(params[0]);
+        const card = hand[index];
+        
+        // Validation
+        const isColorMatch = card.color === topCard.color || card.color === 'black' || (topCard.color === 'black' && topCard.chosenColor === card.color);
+        const isValueMatch = card.value === topCard.value;
+        
+        if (!isColorMatch && !isValueMatch) {
+            return interaction.reply({ content: `${EMOJIS.SYS_ERROR} You cannot play that card!`, ephemeral: true }).catch(() => null);
+        }
+
+        if (card.color === 'black') {
+            // Wild card - need color selection
+            return interaction.update({ content: `**Select a color!**`, components: UI.createUnoWildComponents(gs.id, index) }).catch(() => null);
+        }
+
+        await executeUnoPlay(interaction, gs, pKey, index);
+    }
+
+    if (action === 'wild') {
+        const index = parseInt(params[0]);
+        const chosenColor = params[1];
+        const card = hand[index];
+        card.chosenColor = chosenColor;
+        await executeUnoPlay(interaction, gs, pKey, index);
+    }
+}
+
+async function executeUnoPlay(interaction, gs, pKey, index) {
+    const hand = gs.players[pKey].hand;
+    const card = hand.splice(index, 1)[0];
+    gs.discard.push(card);
+    gs.moveCount++;
+    
+    let skip = false;
+    let drawCount = 0;
+    let reverse = false;
+
+    if (card.value === 'skip') skip = true;
+    if (card.value === 'reverse') {
+        if (gs.playerOrder.length === 2) skip = true;
+        else reverse = true;
+    }
+    if (card.value === 'draw2') { skip = true; drawCount = 2; }
+    if (card.value === 'wild4') { skip = true; drawCount = 4; }
+
+    if (reverse) gs.reverse = !gs.reverse;
+
+    if (drawCount > 0) {
+        const nextIdx = getNextTurnIndex(gs);
+        const nextPKey = gs.playerOrder[nextIdx];
+        for (let i = 0; i < drawCount; i++) {
+            if (gs.deck.length === 0) {
+                const top = gs.discard.pop();
+                gs.deck = gs.discard;
+                gs.discard = [top];
+                shuffle(gs.deck);
+            }
+            gs.players[nextPKey].hand.push(gs.deck.pop());
+        }
+    }
+
+    if (hand.length === 0) {
+        gs.winner = gs.players[pKey];
+        // Stats only for 1v1 usually, but let's just win
+        await updateUnoGame(interaction, gs);
+        await finishGame(interaction, gs, pKey);
+        return;
+    }
+
+    // Move to next turn
+    let moveBy = skip ? 2 : 1;
+    for(let i=0; i<moveBy; i++) {
+        const currentIdx = gs.playerOrder.indexOf(gs.turn);
+        let nextIdx = gs.reverse ? (currentIdx - 1 + gs.playerOrder.length) % gs.playerOrder.length : (currentIdx + 1) % gs.playerOrder.length;
+        gs.turn = gs.playerOrder[nextIdx];
+    }
+
+    await updateUnoGame(interaction, gs);
+}
+
+function getNextTurnIndex(gs) {
+    const currentIdx = gs.playerOrder.indexOf(gs.turn);
+    return gs.reverse ? (currentIdx - 1 + gs.playerOrder.length) % gs.playerOrder.length : (currentIdx + 1) % gs.playerOrder.length;
+}
+
+async function startMultiplayerGame(interaction, players, type) {
+    const gameId = interaction.id;
+    const gs = {
+        id: gameId, type, players: {}, playerOrder: players.map(p => p.id),
+        turn: players[0].id, winner: null, startTime: Date.now(), moveCount: 0,
+        channelId: interaction.channelId, mainMessageId: interaction.message.id,
+        reverse: false
+    };
+    
+    players.forEach(p => { gs.players[p.id] = p; gs.players[p.id].hand = []; });
+
+    if (type === 'uno') {
+        gs.deck = createUnoDeck();
+        shuffle(gs.deck);
+        players.forEach(p => { gs.players[p.id].hand = gs.deck.splice(0, 7); });
+        let topCard = gs.deck.pop();
+        while (topCard.color === 'black') { gs.deck.unshift(topCard); topCard = gs.deck.pop(); }
+        gs.discard = [topCard];
+        gs.page = {}; players.forEach(p => gs.page[p.id] = 0);
+    }
+
+    games.set(gameId, gs);
+    players.forEach(p => activeUsers.add(p.id));
+    
+    await updateUnoGame(interaction, gs);
+}
+
+async function updateUnoGame(interaction, gs) {
+    const buffer = await GameEngine.renderUno(gs);
+    const attachment = new AttachmentBuilder(buffer, { name: 'uno_v2.png' });
+    const embed = UI.createUnoEmbed(gs);
+    
+    const components = UI.createUnoComponents(gs);
+    
+    try {
+        const chan = await client.channels.fetch(gs.channelId);
+        const msg = await chan.messages.fetch(gs.mainMessageId);
+        await msg.edit({ embeds: [embed], files: [attachment], components }).catch(() => null);
+    } catch (e) { console.error('Uno Update Error', e); }
+
+    if (interaction.isButton() && interaction.deferred) {
+        // If we were in an ephemeral hand, we might want to close it or update it
+        await interaction.editReply({ content: `✅ Move processed!`, components: [] }).catch(() => null);
+    } else if (interaction.isButton() && !interaction.replied) {
+         await interaction.update({ content: `✅ Move processed!`, components: [] }).catch(() => null);
+    }
+    
+    setupAfkTimers(gs);
+}
+
+function createUnoDeck() {
+    const colors = ['red', 'blue', 'green', 'yellow'];
+    const deck = [];
+    for (const color of colors) {
+        deck.push({ color, value: '0' });
+        for (let i = 1; i <= 9; i++) {
+            deck.push({ color, value: i.toString() });
+            deck.push({ color, value: i.toString() });
+        }
+        for (const action of ['skip', 'reverse', 'draw2']) {
+            deck.push({ color, value: action });
+            deck.push({ color, value: action });
+        }
+    }
+    for (let i = 0; i < 4; i++) {
+        deck.push({ color: 'black', value: 'wild' });
+        deck.push({ color: 'black', value: 'wild4' });
+    }
+    return deck;
+}
+
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
 async function finishGame(interaction, gameState, winnerKey, resX, resO) {
     if (!gameState.winner && !gameState.isDraw) {
         setupAfkTimers(gameState);
@@ -601,6 +877,16 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
         gameState.status = 'setup';
         gameState.ships = { X: [], O: [] };
         gameState.attacks = { X: [], O: [] };
+    } else if (type === 'uno') {
+        gameState.deck = createUnoDeck();
+        shuffle(gameState.deck);
+        gameState.players.X.hand = gameState.deck.splice(0, 7);
+        gameState.players.O.hand = gameState.deck.splice(0, 7);
+        let topCard = gameState.deck.pop();
+        while (topCard.color === 'black') { gameState.deck.unshift(topCard); topCard = gameState.deck.pop(); }
+        gameState.discard = [topCard];
+        gameState.page = { X: 0, O: 0 };
+        gameState.drawCount = 0; // for draw2/draw4 stacking if we want it, or just simple
     }
 
     games.set(gameId, gameState); activeUsers.add(playerX.id); activeUsers.add(opponent.id);
@@ -628,6 +914,11 @@ async function startNewGame(interaction, opponent, type = 'tictactoe') {
             embed = UI.createBSSetupEmbed(playerX, opponent, gameState);
             components = UI.createBSSetupActionButtons(gameId);
             attachment = null;
+        } else if (type === 'uno') {
+            buffer = await GameEngine.renderUno(gameState);
+            attachment = new AttachmentBuilder(buffer, { name: 'uno_v2.png' });
+            embed = UI.createUnoEmbed(gameState);
+            components = UI.createUnoComponents(gameState, 'X');
         }
 
         const msgPayload = { content: null, embeds: [embed], components };

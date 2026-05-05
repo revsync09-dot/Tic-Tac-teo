@@ -348,6 +348,118 @@ class UIBuilder {
             .setColor('#2b2d31')
             .setDescription(`${emoji} **\` ${title} \`**\n\n┃ ❗ **${message}**`);
     }
+
+    createUnoEmbed(gs) {
+        const titleEmoji = gs.winner ? this.formatEmoji(this.emojis.WIN, '👑') : '🃏';
+        const titleText = gs.winner ? ` UNO: CHAMPION DECLARED ` : ` UNO: TACTICAL MATCH `;
+        
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\`${titleText}\`**\n\n` +
+                `┃ 👥 **\` Players \`**\n` +
+                `┃ ❌ **<@${gs.players.X.id}>**  \` ${gs.players.X.hand.length} Cards \`\n` +
+                `┃ ⭕ **<@${gs.players.O.id}>**  \` ${gs.players.O.hand.length} Cards \`\n\n` +
+                `┃ 🃏 **\` Top Card \`**\n` +
+                `\`\`\`diff\n` +
+                `+ ${gs.discard[gs.discard.length - 1].color.toUpperCase()} ${gs.discard[gs.discard.length - 1].value.toUpperCase()}\n` +
+                `\`\`\`\n` +
+                `┃ ⚙️ **\` Status \`**\n` +
+                `\`\`\`diff\n` +
+                (gs.winner ? `+ WINNER: @${gs.winner.username}\n` : `+ Turn: @${gs.players[gs.turn].username}\n`) +
+                `\`\`\`\n`
+            )
+            .setImage(`attachment://uno_v2.png`)
+            .setTimestamp();
+    }
+
+    createUnoComponents(gs) {
+        return [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`uno_view_hand_${gs.id}`).setLabel('View Hand').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`uno_draw_${gs.id}`).setLabel('Draw Card').setStyle(ButtonStyle.Danger)
+            )
+        ];
+    }
+
+    createUnoHandComponents(gs, pKey) {
+        const hand = gs.players[pKey].hand;
+        const page = gs.page[pKey] || 0;
+        const perPage = 5;
+        const maxPage = Math.ceil(hand.length / perPage) - 1;
+        
+        const row1 = new ActionRowBuilder();
+        const start = page * perPage;
+        const end = Math.min(start + perPage, hand.length);
+
+        for (let i = start; i < end; i++) {
+            const card = hand[i];
+            const colors = { red: ButtonStyle.Danger, blue: ButtonStyle.Primary, green: ButtonStyle.Success, yellow: ButtonStyle.Secondary, black: ButtonStyle.Secondary };
+            const labels = { skip: 'Ø', reverse: '⇄', draw2: '+2', wild: 'W', wild4: '+4' };
+            
+            row1.addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`uno_play_${gs.id}_${i}`)
+                    .setLabel(labels[card.value] || card.value)
+                    .setStyle(colors[card.color])
+                    .setDisabled(gs.turn !== pKey || gs.winner)
+            );
+        }
+
+        const row2 = new ActionRowBuilder();
+        row2.addComponents(
+            new ButtonBuilder().setCustomId(`uno_page_${gs.id}_-1`).setLabel('◀').setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+            new ButtonBuilder().setCustomId(`uno_page_${gs.id}_1`).setLabel('▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= maxPage || hand.length === 0)
+        );
+
+        return row1.components.length > 0 ? [row1, row2] : [row2];
+    }
+
+    createUnoWildComponents(gameId, cardIndex) {
+        return [
+            new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_red`).setLabel('Red').setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_blue`).setLabel('Blue').setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_green`).setLabel('Green').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`uno_wild_${gameId}_${cardIndex}_yellow`).setLabel('Yellow').setStyle(ButtonStyle.Secondary)
+            )
+        ];
+    }
+
+    createLobbyEmbed(lobby) {
+        const titleEmoji = '🏟️';
+        const gearEmoji = '⚙️';
+        
+        const targetList = lobby.targets.map(u => {
+            const joined = lobby.accepted.some(a => a.id === u.id);
+            return `${joined ? '✅' : '⏳'} <@${u.id}>`;
+        }).join('\n');
+
+        return new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setDescription(
+                `${titleEmoji} **\` GAME LOBBY \`**\n\n` +
+                `┃ 👑 **\` Host \`**\n` +
+                `┃ <@${lobby.challenger.id}>\n\n` +
+                `┃ 👥 **\` Invited Players \`**\n` +
+                `${targetList}\n\n` +
+                `┃ ${gearEmoji} **\` Status \`**\n` +
+                `\`\`\`diff\n` +
+                `+ Type: Uno (4-Player Table)\n` +
+                `+ Players: ${lobby.accepted.length + 1} / 4\n` +
+                `\`\`\`\n` +
+                `**\` WAITING FOR PLAYERS \`**\n` +
+                `┃ 🔗 **\` Click Join below to enter \`**`
+            )
+            .setTimestamp();
+    }
+
+    createLobbyButtons(challengerId) {
+        return new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`join_${challengerId}`).setLabel('Join Game').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`start_${challengerId}`).setLabel('Start Match').setStyle(ButtonStyle.Primary)
+        );
+    }
 }
 
 module.exports = UIBuilder;
