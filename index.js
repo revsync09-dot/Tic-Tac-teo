@@ -391,16 +391,27 @@ client.on('interactionCreate', async interaction => {
 
             // GAME MOVES
             const customId = interaction.customId;
-            let gameId, action, extraAction;
-            
+            let gameId, action;
+            const parts = customId.split('_');
+
             if (customId.startsWith('c4_')) {
-                [, gameId, action] = customId.split('_');
+                [, gameId, action] = parts;
             } else if (customId.startsWith('rps_')) {
-                [, gameId, action] = customId.split('_');
+                [, gameId, action] = parts;
+            } else if (customId.startsWith('uno_')) {
+                gameId = parts[2];
+                action = parts[1];
+                const gameState = games.get(gameId);
+                if (!gameState) return interaction.reply({ content: `${EMOJIS.EVENT_EXPIRED} Game expired.`, ephemeral: true }).catch(() => null);
+                await handleUnoMove(interaction, gameState, action, parts.slice(3));
+                return;
+            } else if (customId.startsWith('bs_')) {
+                // Battleship handled above, but just in case
+                return;
             } else {
-                const parts = customId.split('_');
-                if (parts.length === 3) [gameId, action, extraAction] = parts;
-                else return;
+                if (parts.length === 3) {
+                    [gameId, action] = [parts[0], parts[1]];
+                } else return;
             }
 
             const gameState = games.get(gameId);
@@ -412,7 +423,7 @@ client.on('interactionCreate', async interaction => {
 
             try {
                 if (gameState.type === 'tictactoe') {
-                    await handleTTTMove(interaction, gameState, action, extraAction);
+                    await handleTTTMove(interaction, gameState, parts[1], parts[2]);
                 } else if (gameState.type === 'connect4') {
                     await handleC4Move(interaction, gameState, action);
                 } else if (gameState.type === 'rps') {
@@ -832,22 +843,40 @@ async function finishGame(interaction, gameState, winnerKey, resX, resO) {
         return;
     }
     const duration = Math.round((Date.now() - gameState.startTime) / 1000);
-    const matchStats = { moves: gameState.moveCount || gameState.round, duration };
-    const replayRow = UI.createReplayButton(gameState.players.X.id, gameState.players.O.id);
+    const matchStats = { moves: gameState.moveCount || gameState.round || 0, duration };
+    
+    // For 2-player games, provide a replay button
+    let replayRow = null;
+    if (gameState.playerOrder && gameState.playerOrder.length === 2) {
+        replayRow = UI.createReplayButton(gameState.playerOrder[0], gameState.playerOrder[1]);
+    } else if (gameState.players.X && gameState.players.O) {
+        replayRow = UI.createReplayButton(gameState.players.X.id, gameState.players.O.id);
+    }
     
     if (gameState.winner) {
-        const winData = winnerKey === 'X' ? resX : resO;
+        const winData = (winnerKey === 'X' ? resX : (winnerKey === 'O' ? resO : null));
         const winEmbed = UI.createVictoryAnnouncement(gameState.winner, winData?.data?.current_streak || 1, winData?.data?.points || 0, matchStats);
+        
+        const payload = { embeds: [winEmbed] };
+        if (replayRow) payload.components = [replayRow];
+        
         if (gameState.type === 'rps') {
-            await interaction.channel.send({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
+            await interaction.channel.send(payload).catch(() => null);
         } else {
-            await interaction.followUp({ embeds: [winEmbed], components: [replayRow] }).catch(() => null);
+            await interaction.followUp(payload).catch(() => null);
         }
     } else {
+        const p1 = gameState.players.X || gameState.players[gameState.playerOrder[0]];
+        const p2 = gameState.players.O || gameState.players[gameState.playerOrder[1]];
+        const drawEmbed = UI.createDrawAnnouncement(p1, p2);
+        
+        const payload = { embeds: [drawEmbed] };
+        if (replayRow) payload.components = [replayRow];
+
         if (gameState.type === 'rps') {
-            await interaction.channel.send({ embeds: [UI.createDrawAnnouncement(gameState.players.X, gameState.players.O)], components: [replayRow] }).catch(() => null);
+            await interaction.channel.send(payload).catch(() => null);
         } else {
-            await interaction.followUp({ embeds: [UI.createDrawAnnouncement(gameState.players.X, gameState.players.O)], components: [replayRow] }).catch(() => null);
+            await interaction.followUp(payload).catch(() => null);
         }
     }
     cleanupGame(gameState.id);
@@ -939,19 +968,36 @@ function setupAfkTimers(gs) {
         if (chan) {
             const warningTarget = gs.type === 'rps' 
                 ? (!gs.moves.X ? gs.players.X.id : gs.players.O.id)
-                : gs.players[gs.turn].id;
+                : (gs.players[gs.turn]?.id || gs.turn);
             chan.send({ embeds: [UI.createSystemEmbed('AFK WARNING', `<@${warningTarget}> you have 15 seconds to make your move! Fail to move and you will forfeit the game!`)] }).catch(() => null);
         }
     }, AFK_WARNING_MS);
+
     gs.afkForfeitTimer = setTimeout(async () => {
         const loserKey = gs.type === 'rps' 
             ? (!gs.moves.X ? 'X' : 'O')
             : gs.turn;
-        const winnerKey = loserKey === 'X' ? 'O' : 'X';
-        const winner = gs.players[winnerKey]; const loser = gs.players[loserKey];
-        await db.updateStats(winner.id, 'win').catch(() => null); await db.updateStats(loser.id, 'loss').catch(() => null);
+            
+        let winner;
+        if (gs.playerOrder && gs.playerOrder.length > 2) {
+            // In multi-player, just end the game if someone is AFK
+            winner = null;
+        } else {
+            const winnerKey = loserKey === 'X' ? 'O' : (gs.playerOrder ? gs.playerOrder.find(id => id !== loserKey) : (loserKey === gs.players.X.id ? gs.players.O.id : gs.players.X.id));
+            winner = gs.players[winnerKey];
+        }
+
+        const loser = gs.players[loserKey];
+        if (winner && loser) {
+            await db.updateStats(winner.id, 'win').catch(() => null); 
+            await db.updateStats(loser.id, 'loss').catch(() => null);
+        }
+
         const chan = client.channels.cache.get(GAME_CHANNEL_ID);
-        if (chan) chan.send({ embeds: [UI.createAfkForfeit(loser, winner)], components: [UI.createReplayButton(gs.players.X.id, gs.players.O.id)] }).catch(() => null);
+        if (chan) {
+            if (winner && loser) chan.send({ embeds: [UI.createAfkForfeit(loser, winner)], components: [] }).catch(() => null);
+            else if (loser) chan.send({ embeds: [UI.createSystemEmbed('GAME ENDED', `<@${loser.id}> was AFK. Game closed.`, true)] }).catch(() => null);
+        }
         cleanupGame(gs.id);
     }, AFK_FORFEIT_MS);
 }
@@ -959,7 +1005,12 @@ function setupAfkTimers(gs) {
 function cleanupGame(gameId) {
     const gs = games.get(gameId);
     if (gs) {
-        activeUsers.delete(gs.players.X.id); activeUsers.delete(gs.players.O.id);
+        if (gs.playerOrder) {
+            gs.playerOrder.forEach(id => activeUsers.delete(id));
+        } else {
+            if (gs.players.X) activeUsers.delete(gs.players.X.id);
+            if (gs.players.O) activeUsers.delete(gs.players.O.id);
+        }
         clearTimeout(gs.afkWarningTimer); clearTimeout(gs.afkForfeitTimer);
         games.delete(gameId);
     }
