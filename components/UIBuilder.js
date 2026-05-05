@@ -413,7 +413,7 @@ class UIBuilder {
                     .setCustomId(`uno_play_${gs.id}_${i}`)
                     .setLabel(`Card ${i + 1}`)
                     .setStyle(ButtonStyle.Secondary)
-                    .setDisabled(gs.turn !== pKey || gs.winner)
+                    .setDisabled(!!(gs.turn !== pKey || gs.winner))
             );
         }
 
