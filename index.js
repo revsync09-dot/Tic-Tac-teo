@@ -244,6 +244,7 @@ client.on('interactionCreate', async interaction => {
                 lobbies.delete(challengerId);
                 
                 const players = [lobby.challenger, ...lobby.accepted];
+                await interaction.deferUpdate().catch(() => null);
                 await startMultiplayerGame(interaction, players, lobby.type);
                 return;
             }
